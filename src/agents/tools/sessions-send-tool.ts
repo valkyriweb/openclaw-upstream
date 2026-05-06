@@ -366,6 +366,7 @@ export function createSessionsSendTool(opts?: {
       const sessionVisibility = resolveEffectiveSessionToolsVisibility({
         cfg,
         sandboxed: opts?.sandboxed === true,
+        requesterAgentId: resolveAgentIdFromSessionKey(effectiveRequesterKey),
       });
 
       const sessionKeyParam = readStringParam(params, "sessionKey");

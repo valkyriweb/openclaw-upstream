@@ -448,6 +448,7 @@ export function createSessionStatusTool(opts?: {
         visibility: resolveEffectiveSessionToolsVisibility({
           cfg,
           sandboxed: opts?.sandboxed === true,
+          requesterAgentId,
         }),
         a2aPolicy,
       });

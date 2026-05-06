@@ -93,6 +93,58 @@ describe("sessions tools visibility", () => {
     );
   });
 
+  it("honours per-agent tools.sessions.visibility override (ISSUE-040)", async () => {
+    // Global default is "agent" (no cross-agent), but Kael (id="main") has
+    // an explicit override to "all". The cross-agent send should be allowed
+    // when the requester is Kael, regardless of the global default.
+    mockConfig = {
+      session: { mainKey: "main", scope: "per-sender" },
+      tools: {
+        sessions: { visibility: "agent" },
+        agentToAgent: { enabled: true, allow: ["*"] },
+      },
+      agents: {
+        list: [
+          {
+            id: "main",
+            tools: { sessions: { visibility: "all" } },
+          },
+        ],
+      },
+    };
+    mockGatewayWithHistory();
+    const tool = getSessionsHistoryTool();
+
+    const result = await tool.execute("call-iss040", {
+      sessionKey: "agent:smilerite:quietchat:direct:someone-else",
+    });
+    expect(result.details).toMatchObject({
+      sessionKey: "agent:smilerite:quietchat:direct:someone-else",
+    });
+  });
+
+  it("falls back to global tools.sessions.visibility when no per-agent override (ISSUE-040)", async () => {
+    // No per-agent override on "main"; expect the existing "agent" global to
+    // forbid cross-agent access (regression guard).
+    mockConfig = {
+      session: { mainKey: "main", scope: "per-sender" },
+      tools: {
+        sessions: { visibility: "agent" },
+        agentToAgent: { enabled: true, allow: ["*"] },
+      },
+      agents: {
+        list: [{ id: "main", tools: { profile: "default" } }],
+      },
+    };
+    mockGatewayWithHistory();
+    const tool = getSessionsHistoryTool();
+
+    const denied = await tool.execute("call-iss040b", {
+      sessionKey: "agent:smilerite:quietchat:direct:someone-else",
+    });
+    expect(denied.details).toMatchObject({ status: "forbidden" });
+  });
+
   it("clamps sandboxed sessions to tree when agents.defaults.sandbox.sessionToolsVisibility=spawned", async () => {
     mockConfig = {
       session: { mainKey: "main", scope: "per-sender" },

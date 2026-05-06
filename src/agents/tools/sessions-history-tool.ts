@@ -329,6 +329,7 @@ export function createSessionsHistoryTool(opts?: {
       const visibility = resolveEffectiveSessionToolsVisibility({
         cfg,
         sandboxed: opts?.sandboxed === true,
+        requesterAgentId: resolveAgentIdFromSessionKey(effectiveRequesterKey),
       });
       const visibilityGuard = await createSessionVisibilityGuard({
         action: "history",

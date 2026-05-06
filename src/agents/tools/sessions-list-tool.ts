@@ -106,6 +106,7 @@ export function createSessionsListTool(opts?: {
       const visibility = resolveEffectiveSessionToolsVisibility({
         cfg,
         sandboxed: opts?.sandboxed === true,
+        requesterAgentId: resolveAgentIdFromSessionKey(effectiveRequesterKey),
       });
 
       const kindsRaw = readStringArrayParam(params, "kinds")

@@ -51,17 +51,18 @@ export async function filterMemorySearchHitsBySessionVisibility(params: {
   sandboxed: boolean;
   hits: MemorySearchResult[];
 }): Promise<MemorySearchResult[]> {
-  const visibility = resolveEffectiveSessionToolsVisibility({
-    cfg: params.cfg,
-    sandboxed: params.sandboxed,
-  });
-  const a2aPolicy = createAgentToAgentPolicy(params.cfg);
   const requesterAgentId = params.requesterSessionKey
     ? resolveSessionAgentId({
         sessionKey: params.requesterSessionKey,
         config: params.cfg,
       })
     : undefined;
+  const visibility = resolveEffectiveSessionToolsVisibility({
+    cfg: params.cfg,
+    sandboxed: params.sandboxed,
+    requesterAgentId,
+  });
+  const a2aPolicy = createAgentToAgentPolicy(params.cfg);
   const scopedAgentId = params.agentId?.trim() || requesterAgentId;
   const guard = params.requesterSessionKey
     ? await createSessionVisibilityGuard({

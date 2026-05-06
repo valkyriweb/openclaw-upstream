@@ -73,23 +73,56 @@ export async function listSpawnedSessionKeys(params: {
   }
 }
 
-/** Resolve configured session-tool visibility, defaulting invalid or missing values to tree. */
-export function resolveSessionToolsVisibility(cfg: OpenClawConfig): SessionToolsVisibility {
-  const raw = (cfg.tools as { sessions?: { visibility?: unknown } } | undefined)?.sessions
-    ?.visibility;
+function readVisibilityValue(raw: unknown): SessionToolsVisibility | undefined {
   const value = normalizeLowercaseStringOrEmpty(raw);
   if (value === "self" || value === "tree" || value === "agent" || value === "all") {
     return value;
   }
-  return "tree";
+  return undefined;
+}
+
+/**
+ * Resolve the session tools visibility for a request, preferring a per-agent
+ * override on `cfg.agents.list[id == requesterAgentId].tools.sessions.visibility`
+ * when present, otherwise falling back to the global
+ * `cfg.tools.sessions.visibility`.
+ *
+ * ISSUE-040: per-agent override is the durable patch that lets a single agent
+ * (e.g. Kael) reach `visibility: "all"` while the global default stays
+ * scoped to `"agent"` for the rest of the cohort.
+ */
+export function resolveSessionToolsVisibility(
+  cfg: OpenClawConfig,
+  requesterAgentId?: string,
+): SessionToolsVisibility {
+  if (requesterAgentId) {
+    const agentList = (
+      cfg.agents as { list?: Array<{ id?: unknown; tools?: unknown }> } | undefined
+    )?.list;
+    if (Array.isArray(agentList)) {
+      const match = agentList.find(
+        (entry) => normalizeOptionalString(entry?.id) === requesterAgentId,
+      );
+      const perAgentRaw = (match?.tools as { sessions?: { visibility?: unknown } } | undefined)
+        ?.sessions?.visibility;
+      const perAgent = readVisibilityValue(perAgentRaw);
+      if (perAgent) {
+        return perAgent;
+      }
+    }
+  }
+  const globalRaw = (cfg.tools as { sessions?: { visibility?: unknown } } | undefined)?.sessions
+    ?.visibility;
+  return readVisibilityValue(globalRaw) ?? "tree";
 }
 
 /** Resolve visibility after applying sandbox clamps for spawned-session-only agents. */
 export function resolveEffectiveSessionToolsVisibility(params: {
   cfg: OpenClawConfig;
   sandboxed: boolean;
+  requesterAgentId?: string;
 }): SessionToolsVisibility {
-  const visibility = resolveSessionToolsVisibility(params.cfg);
+  const visibility = resolveSessionToolsVisibility(params.cfg, params.requesterAgentId);
   if (!params.sandboxed) {
     return visibility;
   }
