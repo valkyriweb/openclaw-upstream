@@ -251,17 +251,51 @@ describe("resolveExecTarget", () => {
     );
   });
 
-  it("requires an exact match for non-auto configured targets", () => {
-    expect(() =>
+  it("treats requested=auto as 'defer to configured' when configured is gateway", () => {
+    // The exec tool schema defaults `host` to "auto", so models routinely emit it
+    // without intent to override the operator-pinned target. Previously this
+    // stranded every exec call whenever tools.exec.host was pinned to a
+    // specific host.
+    expect(
       resolveExecTarget({
         configuredTarget: "gateway",
         requestedTarget: "auto",
         elevatedRequested: false,
         sandboxAvailable: true,
       }),
-    ).toThrow(
-      "exec host not allowed (requested auto; configured host is gateway; set tools.exec.host=auto to allow this override).",
-    );
+    ).toMatchObject({
+      configuredTarget: "gateway",
+      requestedTarget: "auto",
+      selectedTarget: "gateway",
+      effectiveHost: "gateway",
+    });
+  });
+
+  it("treats requested=auto as 'defer to configured' when configured is node", () => {
+    expect(
+      resolveExecTarget({
+        configuredTarget: "node",
+        requestedTarget: "auto",
+        elevatedRequested: false,
+        sandboxAvailable: false,
+      }),
+    ).toMatchObject({
+      configuredTarget: "node",
+      requestedTarget: "auto",
+      selectedTarget: "node",
+      effectiveHost: "node",
+    });
+  });
+
+  it("still rejects explicit non-auto overrides against a pinned configured host", () => {
+    expect(() =>
+      resolveExecTarget({
+        configuredTarget: "gateway",
+        requestedTarget: "node",
+        elevatedRequested: false,
+        sandboxAvailable: true,
+      }),
+    ).toThrow(/exec host not allowed \(requested node; configured host is gateway/);
   });
 
   it("allows exact node matches", () => {

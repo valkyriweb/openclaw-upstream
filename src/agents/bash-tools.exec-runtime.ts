@@ -216,6 +216,13 @@ export function isRequestedExecTargetAllowed(params: {
   if (params.requestedTarget === params.configuredTarget) {
     return true;
   }
+  // Treat requested="auto" as "use configured default" rather than an override
+  // attempt. The exec tool schema defaults `host` to "auto", so models routinely
+  // emit it without intent to override; rejecting that strands every exec call
+  // whenever the operator pinned tools.exec.host=gateway|node|sandbox.
+  if (params.requestedTarget === "auto") {
+    return true;
+  }
   if (params.configuredTarget === "auto") {
     if (
       params.sandboxAvailable &&
@@ -262,7 +269,11 @@ export function resolveExecTarget(params: {
         `set tools.exec.host=${allowedConfig} to allow this override).`,
     );
   }
-  const selectedTarget = requestedTarget ?? configuredTarget;
+  // requested="auto" means "defer to configured"; collapse it so downstream
+  // host resolution honors the operator-pinned target instead of re-deriving
+  // from sandbox availability.
+  const selectedTarget =
+    requestedTarget === "auto" ? configuredTarget : (requestedTarget ?? configuredTarget);
   const resolvedTarget = params.elevatedRequested
     ? selectedTarget === "node"
       ? "node"
