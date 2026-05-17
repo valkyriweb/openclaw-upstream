@@ -683,6 +683,13 @@ async function loadReferenceImages(params: {
             localRoots,
             ssrfPolicy: params.ssrfPolicy,
             ...(isHttpUrl ? { readIdleTimeoutMs: REMOTE_MEDIA_READ_IDLE_TIMEOUT_MS } : {}),
+            // Resolve plain relative paths (e.g. "social/media/drafts/x.jpg")
+            // against the agent's workspaceDir. Without this, loadWebMedia
+            // resolves them against process.cwd() (`/app` in the cluster pod),
+            // and the resulting path falls outside the agent workspace root,
+            // tripping assertLocalMediaAllowed with "path-not-allowed". The
+            // sandbox branch handles its own resolution upstream.
+            workspaceDir: params.workspaceDir,
           });
     if (media.kind !== "image") {
       throw new ToolInputError(`Unsupported media type: ${media.kind}`);

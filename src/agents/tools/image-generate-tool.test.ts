@@ -2137,6 +2137,29 @@ describe("createImageGenerateTool", () => {
     }
   });
 
+  it("forwards workspaceDir to loadWebMedia so relative reference paths resolve under the agent workspace", async () => {
+    // Regression: without workspaceDir, loadWebMedia resolves relative paths
+    // against process.cwd() (`/app` in the cluster pod) and trips
+    // assertLocalMediaAllowed with path-not-allowed. The agent sees the error
+    // as "Local media path is not under an allowed directory: <rel>" and the
+    // session hangs on retry loops.
+    stubEditedImageFlow({ width: 1024, height: 1024 });
+    const workspaceDir = "/home/node/.openclaw/workspace-smilerite";
+    const tool = createToolWithPrimaryImageModel("google/gemini-3-pro-image-preview", {
+      workspaceDir,
+    });
+
+    await tool.execute("call-edit-relative-ref", {
+      prompt: "Use this reference.",
+      image: "social/media/drafts/feature-friday-v13.jpg",
+    });
+
+    expect(webMedia.loadWebMedia).toHaveBeenCalledWith(
+      "social/media/drafts/feature-friday-v13.jpg",
+      expect.objectContaining({ workspaceDir }),
+    );
+  });
+
   it("passes web_fetch SSRF policy to remote reference images", async () => {
     stubImageGenerationProviders();
     const generateImage = stubEditedImageFlow({ width: 1024, height: 1024 });
