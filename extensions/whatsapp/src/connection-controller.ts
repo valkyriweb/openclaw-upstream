@@ -404,7 +404,13 @@ export class WhatsAppConnectionController {
     this.heartbeatSeconds = params.heartbeatSeconds;
     this.transportTimeoutMs = params.transportTimeoutMs;
     this.messageTimeoutMs = params.messageTimeoutMs;
-    this.appSilenceTimeoutMs = params.messageTimeoutMs * 4;
+    // Local patch (ISSUE-102): upstream stretches this cap to 4× messageTimeoutMs to
+    // avoid disconnecting low-traffic accounts (#70678). For our primary accounts
+    // (bermont/nadya/smilerite) the resulting ~2 h blind window is too wide — WA can
+    // silently route a socket out of message delivery while transport pings still pong,
+    // and any inbound during that window is lost (delivered server-side, never decrypted
+    // client-side). Paired with the periodic presence-update keepalive in session.ts.
+    this.appSilenceTimeoutMs = params.messageTimeoutMs;
     this.watchdogCheckMs = params.watchdogCheckMs;
     this.reconnectPolicy = params.reconnectPolicy;
     this.abortSignal = params.abortSignal;

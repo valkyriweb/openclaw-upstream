@@ -626,6 +626,59 @@ describe("web session", () => {
     vi.useRealTimers();
   });
 
+  // ISSUE-102b: presence-ping keepalive — local patch in session.ts fires
+  // sock.sendPresenceUpdate("available") immediately on connection.open and
+  // every PRESENCE_PING_INTERVAL_MS (10 min) thereafter, and stops the interval
+  // when the socket closes. The keepalive is paired with the tightened
+  // app-silence cap in connection-controller.ts (ISSUE-102a); together they
+  // bound the post-reconnect blind window to messageTimeoutMs instead of 4x.
+  it("fires presence-ping on connection open and on interval (ISSUE-102b)", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      await createWaSocket(false, false);
+      const sock = getLastSocket();
+      // mock auto-emits connection.update { connection: "open" } via setImmediate;
+      // wait for the immediate presence-ping to land.
+      await vi.waitFor(() => {
+        expect(sock.sendPresenceUpdate).toHaveBeenCalledWith("available");
+      });
+      const afterOpen = sock.sendPresenceUpdate.mock.calls.length;
+      expect(afterOpen).toBeGreaterThanOrEqual(1);
+
+      vi.advanceTimersByTime(10 * 60 * 1000);
+      expect(sock.sendPresenceUpdate).toHaveBeenCalledTimes(afterOpen + 1);
+
+      vi.advanceTimersByTime(10 * 60 * 1000);
+      expect(sock.sendPresenceUpdate).toHaveBeenCalledTimes(afterOpen + 2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops presence-ping when connection closes (ISSUE-102b)", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      await createWaSocket(false, false);
+      const sock = getLastSocket();
+      await vi.waitFor(() => {
+        expect(sock.sendPresenceUpdate).toHaveBeenCalledWith("available");
+      });
+      const beforeClose = sock.sendPresenceUpdate.mock.calls.length;
+
+      sock.ev.emit("connection.update", {
+        connection: "close",
+        lastDisconnect: new Error("bye"),
+      });
+      // flush the async connection.update handler.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      vi.advanceTimersByTime(30 * 60 * 1000);
+      expect(sock.sendPresenceUpdate).toHaveBeenCalledTimes(beforeClose);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("logWebSelfId prints cached E.164 when creds exist", () => {
     const authDir = createTempAuthDir("openclaw-wa-log-self");
     fsSync.writeFileSync(

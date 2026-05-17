@@ -69,6 +69,13 @@ const WHATSAPP_WEBSOCKET_PROXY_TARGET = "https://mmg.whatsapp.net/";
 const CREDS_FLUSH_TIMEOUT_MESSAGE =
   "Queued WhatsApp creds save did not finish before auth bootstrap; skipping repair and continuing with primary creds.";
 export const OPENCLAW_WHATSAPP_WEB_SOCKET_URL_ENV = "OPENCLAW_WHATSAPP_WEB_SOCKET_URL";
+// Local patch (ISSUE-102): proactively send a presence-update every 10 min so WA
+// keeps pushing real app-layer frames to us. A successful ping elicits an IQ ack
+// that refreshes lastInboundAt; a failed one trips the controller's watchdog
+// promptly instead of waiting out the (already-tightened) silence cap. Paired
+// with the connection-controller.ts cap reduction. Cost: contacts see us as
+// consistently online — acceptable for agent accounts.
+const PRESENCE_PING_INTERVAL_MS = 10 * 60 * 1000;
 
 async function rejectUnsafeWebCredsPath(authDir: string): Promise<void> {
   await assertWebCredsPathRegularFileOrMissing(resolveWebCredsPath(authDir));
@@ -220,6 +227,20 @@ export async function createWaSocket(
     ...(opts.cachedGroupMetadata ? { cachedGroupMetadata: opts.cachedGroupMetadata } : {}),
   });
 
+  // Local patch (ISSUE-102): presence-ping lifecycle tied to the socket.
+  let presencePingTimer: ReturnType<typeof setInterval> | null = null;
+  const stopPresencePing = () => {
+    if (presencePingTimer) {
+      clearInterval(presencePingTimer);
+      presencePingTimer = null;
+    }
+  };
+  const sendPresencePing = () => {
+    sock.sendPresenceUpdate("available").catch((err) => {
+      sessionLogger.warn({ error: String(err) }, "WhatsApp presence-ping failed");
+    });
+  };
+
   sock.ev.on("creds.update", () => enqueueSaveCreds(authDir, saveCreds, sessionLogger));
   sock.ev.on("connection.update", (update: Partial<import("baileys").ConnectionState>) => {
     void (async () => {
@@ -235,6 +256,8 @@ export async function createWaSocket(
           }
         }
         if (connection === "close") {
+          // ISSUE-102b: stop presence-ping when WA closes the socket.
+          stopPresencePing();
           const status = getStatusCode(lastDisconnect?.error);
           if (status === LOGGED_OUT_STATUS) {
             console.error(
@@ -244,8 +267,15 @@ export async function createWaSocket(
             );
           }
         }
-        if (connection === "open" && verbose) {
-          console.log(success("WhatsApp Web connected."));
+        if (connection === "open") {
+          if (verbose) {
+            console.log(success("WhatsApp Web connected."));
+          }
+          // ISSUE-102b: fire one ping immediately so the first IQ ack lands within
+          // seconds, then keep the interval running. PRESENCE_PING_INTERVAL_MS.
+          stopPresencePing();
+          sendPresencePing();
+          presencePingTimer = setInterval(sendPresencePing, PRESENCE_PING_INTERVAL_MS);
         }
       } catch (err) {
         sessionLogger.error({ error: String(err) }, "connection.update handler error");
@@ -257,6 +287,7 @@ export async function createWaSocket(
   if (sock.ws && typeof (sock.ws as unknown as { on?: unknown }).on === "function") {
     sock.ws.on("error", (err: Error) => {
       sessionLogger.error({ error: String(err) }, "WebSocket error");
+      stopPresencePing();
     });
   }
 
