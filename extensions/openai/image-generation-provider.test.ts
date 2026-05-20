@@ -1252,6 +1252,73 @@ describe("openai image generation provider", () => {
     expect(body.tools?.[0]?.moderation).toBe("low");
   });
 
+  // ISSUE-106: edit-mode action + edit instructions when input images are present.
+  it("applies edit-mode action and edit instructions for Codex Responses when input images are present", async () => {
+    mockCodexAuthOnly();
+    mockCodexImageStream({ imageData: "codex-edit-image" });
+
+    const provider = buildOpenAIImageGenerationProvider();
+    const result = await provider.generateImage({
+      provider: "openai",
+      model: "gpt-image-2",
+      prompt: "Replace only the top-left logo using image 2 exactly",
+      cfg: {},
+      authStore: { version: 1, profiles: {} },
+      inputImages: [
+        { buffer: Buffer.from("base-png"), mimeType: "image/png", fileName: "base.png" },
+        { buffer: Buffer.from("logo-png"), mimeType: "image/png", fileName: "logo.png" },
+      ],
+      outputFormat: "png",
+    });
+
+    const request = jsonRequestCall();
+    const body = request.body as {
+      instructions: string;
+      input: Array<{ content: Array<Record<string, unknown>> }>;
+      tools: Array<Record<string, unknown>>;
+    };
+    expect(request.url).toBe("https://chatgpt.com/backend-api/codex/responses");
+    expect(body.instructions).toContain("image editing assistant");
+    expect(body.instructions).toContain("preserve their content faithfully");
+    expect(body.tools[0]?.action).toBe("edit");
+    expect(body.tools[0]?.input_fidelity).toBeUndefined();
+    expect(body.tools[0]?.type).toBe("image_generation");
+    expect(body.tools[0]?.model).toBe("gpt-image-2");
+    const userContent = body.input[0]?.content ?? [];
+    expect(userContent[0]).toEqual({
+      type: "input_text",
+      text: "Replace only the top-left logo using image 2 exactly",
+    });
+    expect(userContent.filter((part) => part.type === "input_image")).toHaveLength(2);
+    expect(result.images[0]?.buffer).toEqual(Buffer.from("codex-edit-image"));
+  });
+
+  // ISSUE-106: no input images → generation mode, no `action` field.
+  it("omits edit-mode action and uses generation instructions for Codex Responses when no input images are present", async () => {
+    mockCodexAuthOnly();
+    mockCodexImageStream({ imageData: "codex-gen-image" });
+
+    const provider = buildOpenAIImageGenerationProvider();
+    await provider.generateImage({
+      provider: "openai",
+      model: "gpt-image-2",
+      prompt: "Draw a fresh scene from scratch",
+      cfg: {},
+      authStore: { version: 1, profiles: {} },
+      outputFormat: "png",
+    });
+
+    const request = jsonRequestCall();
+    const body = request.body as {
+      instructions: string;
+      tools: Array<Record<string, unknown>>;
+    };
+    expect(body.instructions).toBe("You are an image generation assistant.");
+    expect(body.tools[0]?.action).toBeUndefined();
+    expect(body.tools[0]?.input_fidelity).toBeUndefined();
+  });
+
+  // ISSUE-107: PNG output → `output_compression` stripped from Codex request body.
   it("omits output compression for PNG Codex image requests", async () => {
     mockCodexAuthOnly();
     mockCodexImageStream({ imageData: "codex-png-image" });

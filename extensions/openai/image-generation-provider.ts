@@ -43,6 +43,8 @@ const DEFAULT_OPENAI_IMAGE_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_OPENAI_CODEX_IMAGE_BASE_URL = OPENAI_CODEX_RESPONSES_BASE_URL;
 const DEFAULT_OPENAI_CODEX_IMAGE_RESPONSES_MODEL = "gpt-5.5";
 const OPENAI_CODEX_IMAGE_INSTRUCTIONS = "You are an image generation assistant.";
+const OPENAI_CODEX_IMAGE_EDIT_INSTRUCTIONS =
+  "You are an image editing assistant. The user has provided one or more reference images. Use the image_generation tool to edit the provided image(s). The input images are exact references — preserve their content faithfully, especially logos, wordmarks, typography, product packaging, and labels. Do not redraw or reinterpret reference content.";
 const OPENAI_TRANSPARENT_BACKGROUND_IMAGE_MODEL = "gpt-image-1.5";
 const DEFAULT_OPENAI_IMAGE_TIMEOUT_MS = 180_000;
 const DEFAULT_AZURE_OPENAI_IMAGE_TIMEOUT_MS = 600_000;
@@ -717,6 +719,7 @@ async function generateOpenAICodexImage(params: {
 }): Promise<ImageGenerationResult> {
   const { req, apiKey } = params;
   const inputImages = req.inputImages ?? [];
+  const editAware = inputImages.length > 0;
   const openAIProviderConfig = req.cfg?.models?.providers?.openai;
   const codexProviderConfig =
     openAIProviderConfig?.api === "openai-chatgpt-responses" ? openAIProviderConfig : undefined;
@@ -771,12 +774,15 @@ async function generateOpenAICodexImage(params: {
             content,
           },
         ],
-        instructions: OPENAI_CODEX_IMAGE_INSTRUCTIONS,
+        instructions: editAware
+          ? OPENAI_CODEX_IMAGE_EDIT_INSTRUCTIONS
+          : OPENAI_CODEX_IMAGE_INSTRUCTIONS,
         tools: [
           {
             type: "image_generation",
             model,
             size,
+            ...(editAware ? { action: "edit" } : {}),
             ...(req.quality !== undefined ? { quality: req.quality } : {}),
             ...(req.outputFormat !== undefined ? { output_format: req.outputFormat } : {}),
             ...(background !== undefined ? { background } : {}),
