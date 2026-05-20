@@ -56,6 +56,7 @@ import {
 import { optionalStringEnum } from "../schema/string-enum.js";
 import {
   ToolInputError,
+  readNumberParam,
   readNonNegativeIntegerParam,
   readPositiveIntegerParam,
   readStringParam,
@@ -390,6 +391,23 @@ function readRecordParam(params: Record<string, unknown>, key: string): Record<s
     : {};
 }
 
+function normalizeOpenAIOutputCompression(
+  raw: Record<string, unknown>,
+  outputFormat: ImageGenerationOutputFormat | undefined,
+): number | undefined {
+  const outputCompression = readNumberParam(raw, "outputCompression", { integer: true });
+  if (outputCompression === undefined) {
+    return undefined;
+  }
+  if (outputCompression < 0 || outputCompression > 100) {
+    throw new ToolInputError("openai.outputCompression must be between 0 and 100");
+  }
+  if (outputFormat === "png") {
+    return undefined;
+  }
+  return outputCompression;
+}
+
 function normalizeOpenAIOptions(args: Record<string, unknown>): ImageGenerationOpenAIOptions {
   const raw = readRecordParam(args, "openai");
   const background = normalizeOpenAIBackground(readStringParam(raw, "background"));
@@ -397,13 +415,9 @@ function normalizeOpenAIOptions(args: Record<string, unknown>): ImageGenerationO
   if (readSnakeCaseParamRaw(raw, "outputCompression") === null) {
     throw new ToolInputError("openai.outputCompression must be between 0 and 100");
   }
-  const outputCompression = readNonNegativeIntegerParam(raw, "outputCompression", {
-    message: "openai.outputCompression must be between 0 and 100",
-  });
+  const outputFormat = normalizeOutputFormat(readStringParam(args, "outputFormat"));
+  const outputCompression = normalizeOpenAIOutputCompression(raw, outputFormat);
   const user = readStringParam(raw, "user");
-  if (outputCompression !== undefined && (outputCompression < 0 || outputCompression > 100)) {
-    throw new ToolInputError("openai.outputCompression must be between 0 and 100");
-  }
   return {
     ...(background ? { background } : {}),
     ...(moderation ? { moderation } : {}),

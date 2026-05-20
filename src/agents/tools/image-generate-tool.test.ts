@@ -1857,6 +1857,44 @@ describe("createImageGenerateTool", () => {
     expect(generateImage).not.toHaveBeenCalled();
   });
 
+  it("drops OpenAI PNG compression options", async () => {
+    const generateImage = vi.spyOn(imageGenerationRuntime, "generateImage").mockResolvedValue({
+      provider: "openai",
+      model: "gpt-image-2",
+      attempts: [],
+      ignoredOverrides: [],
+      images: [
+        {
+          buffer: Buffer.from("png-out"),
+          mimeType: "image/png",
+          fileName: "preview.png",
+        },
+      ],
+    });
+    vi.spyOn(mediaStore, "saveMediaBuffer").mockResolvedValue({
+      path: "/tmp/generated.png",
+      id: "generated.png",
+      size: 5,
+      contentType: "image/png",
+    });
+
+    const tool = createToolWithPrimaryImageModel("openai/gpt-image-2");
+    await tool.execute("call-openai-png-compression-default", {
+      prompt: "Edit the supplied references",
+      outputFormat: "png",
+      openai: {
+        outputCompression: 50,
+        user: "smilerite",
+      },
+    });
+
+    expect(mockCallArg(generateImage, 0, "generateImage").providerOptions).toEqual({
+      openai: {
+        user: "smilerite",
+      },
+    });
+  });
+
   it("forwards transparent OpenAI background requests with a PNG output format", async () => {
     const generateImage = vi.spyOn(imageGenerationRuntime, "generateImage").mockResolvedValue({
       provider: "openai",
