@@ -188,9 +188,10 @@ export function resolveGatewayOptions(opts?: GatewayCallOptions) {
         explicitToken,
       })
     : explicitToken;
+  // ISSUE-104: ignore non-positive timeoutMs overrides (older clamp turned 0 → 1ms).
   const timeoutMs =
-    typeof opts?.timeoutMs === "number" && Number.isFinite(opts.timeoutMs)
-      ? Math.max(1, Math.floor(opts.timeoutMs))
+    typeof opts?.timeoutMs === "number" && Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0
+      ? Math.floor(opts.timeoutMs)
       : 30_000;
   const envGatewayUrl = trimToUndefined(process.env.OPENCLAW_GATEWAY_URL);
   const target =
