@@ -117,6 +117,7 @@ import {
   refreshGatewayHealthSnapshot,
 } from "./server/health-state.js";
 import { resolveHookClientIpConfig } from "./server/hook-client-ip-config.js";
+import { createIntervalHealthRegistry } from "./server/interval-health.js";
 import { createReadinessChecker } from "./server/readiness.js";
 import { loadGatewayTlsRuntime } from "./server/tls.js";
 import { resolveSharedGatewaySessionGeneration } from "./server/ws-shared-generation.js";
@@ -861,6 +862,9 @@ export async function startGatewayServer(
   });
   const deferStartupSidecars = opts.deferStartupSidecars === true;
   const isGatewayStartupPending = () => !startupSidecarsReady && !deferStartupSidecars;
+  // Gap 2 (ISSUE-109) — per-timer interval registry surfaced on /readyz.intervals
+  // and used to flip eventLoop.degraded when any registered timer misses >= 3 ticks.
+  const intervalHealth = createIntervalHealthRegistry();
   const getReadiness = createReadinessChecker({
     channelManager,
     startedAt: serverStartedAt,
@@ -868,6 +872,7 @@ export async function startGatewayServer(
     getStartupPendingReason: () => startupPendingReason,
     getGatewayDraining: isGatewayDraining,
     getEventLoopHealth: readinessEventLoopHealth.snapshot,
+    getIntervalHealth: () => intervalHealth,
     shouldSkipChannelReadiness: () =>
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) ||
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS),
@@ -895,6 +900,7 @@ export async function startGatewayServer(
     removeChatRun,
     chatAbortControllers,
     toolEventRecipients,
+    metricsCounters,
   } = await startupTrace.measure("runtime.state", () =>
     createGatewayRuntimeState({
       cfg: cfgAtStart,
@@ -1130,6 +1136,7 @@ export async function startGatewayServer(
           removeChatRun,
           agentRunSeq,
           nodeSendToSession,
+          intervalHealth,
           ...(typeof cfgAtStart.media?.ttlHours === "number"
             ? { mediaCleanupTtlMs: resolveMediaCleanupTtlMs(cfgAtStart.media.ttlHours) }
             : {}),
@@ -1176,6 +1183,8 @@ export async function startGatewayServer(
         cfgAtStart,
         channelManager,
         log,
+        intervalHealth,
+        metricsCounters,
       }),
     );
     Object.assign(runtimeState, runtimeServices);

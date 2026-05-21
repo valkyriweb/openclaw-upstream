@@ -23,6 +23,10 @@ import {
 import type { DedupeEntry } from "./server-shared.js";
 import { formatError } from "./server-utils.js";
 import { setBroadcastHealthUpdate } from "./server/health-state.js";
+import type { IntervalHealthRegistry } from "./server/interval-health.js";
+
+const DEDUPE_CLEANUP_INTERVAL_MS = 60_000;
+const MEDIA_CLEANUP_INTERVAL_MS = 60 * 60_000;
 
 export function startGatewayMaintenanceTimers(params: {
   broadcast: (
@@ -64,6 +68,13 @@ export function startGatewayMaintenanceTimers(params: {
   agentRunSeq: Map<string, number>;
   nodeSendToSession: (sessionKey: string, event: string, payload: unknown) => void;
   mediaCleanupTtlMs?: number;
+  /**
+   * Optional interval-health registry. When wired, each timer's callback
+   * stamps `lastFiredAtMs` on every fire (Gap 2 / ISSUE-109) so `/readyz`
+   * can surface per-timer freshness and `lab-heartbeat-check.sh` can grade
+   * each loop independently of the event-loop sampler.
+   */
+  intervalHealth?: IntervalHealthRegistry;
 }): {
   tickInterval: ReturnType<typeof setInterval>;
   healthInterval: ReturnType<typeof setInterval>;
@@ -80,8 +91,19 @@ export function startGatewayMaintenanceTimers(params: {
     params.nodeSendToAllSubscribed("health", snap);
   });
 
+  params.intervalHealth?.register("tick", TICK_INTERVAL_MS);
+  params.intervalHealth?.register("healthRefresh", HEALTH_REFRESH_INTERVAL_MS);
+  params.intervalHealth?.register("dedupeCleanup", DEDUPE_CLEANUP_INTERVAL_MS);
+  // Always advertise the six well-known intervals on /readyz.intervals even
+  // when the corresponding setInterval is not active for this config (e.g.
+  // mediaCleanup only fires when media.ttlHours is set). Consumers see a
+  // stable shape; an unstarted interval reports `lastFiredAtMs: null` and
+  // `missedTicks: 0` (interval-health.ts short-circuits on intervalMs <= 0).
+  params.intervalHealth?.register("mediaCleanup", MEDIA_CLEANUP_INTERVAL_MS);
+
   // periodic keepalive
   const tickInterval = setInterval(() => {
+    params.intervalHealth?.recordFire("tick");
     const payload = { ts: Date.now() };
     params.broadcast("tick", payload);
     params.nodeSendToAllSubscribed("tick", payload);
@@ -90,6 +112,7 @@ export function startGatewayMaintenanceTimers(params: {
   // Keep cached health warm without request-time live channel probes. Explicit
   // status/doctor probe paths still pass probe=true when the operator asks.
   const healthInterval = setInterval(() => {
+    params.intervalHealth?.recordFire("healthRefresh");
     void params
       .refreshGatewayHealthSnapshot({ probe: false })
       .catch((err: unknown) => params.logHealth.error(`refresh failed: ${formatError(err)}`));
@@ -102,6 +125,7 @@ export function startGatewayMaintenanceTimers(params: {
 
   // dedupe cache cleanup
   const dedupeCleanup = setInterval(() => {
+    params.intervalHealth?.recordFire("dedupeCleanup");
     const AGENT_RUN_SEQ_MAX = 10_000;
     const now = Date.now();
     const resolveDedupeRunId = (key: string, entry: DedupeEntry) => {
@@ -283,7 +307,7 @@ export function startGatewayMaintenanceTimers(params: {
     }
     // Sweep stale agent run contexts (orphaned when lifecycle end/error is missed).
     sweepStaleRunContexts();
-  }, 60_000);
+  }, DEDUPE_CLEANUP_INTERVAL_MS);
 
   if (typeof params.mediaCleanupTtlMs !== "number") {
     return { tickInterval, healthInterval, dedupeCleanup, mediaCleanup: null };
@@ -308,8 +332,9 @@ export function startGatewayMaintenanceTimers(params: {
   };
 
   const mediaCleanup = setInterval(() => {
+    params.intervalHealth?.recordFire("mediaCleanup");
     void runMediaCleanup();
-  }, 60 * 60_000);
+  }, MEDIA_CLEANUP_INTERVAL_MS);
 
   void runMediaCleanup();
 

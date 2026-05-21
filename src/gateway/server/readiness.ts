@@ -9,6 +9,7 @@ import {
 } from "../channel-health-policy.js";
 import type { ChannelManager } from "../server-channels.js";
 import type { GatewayEventLoopHealth } from "./event-loop-health.js";
+import type { IntervalHealthRegistry, IntervalHealthSnapshot } from "./interval-health.js";
 
 /** Snapshot returned by the gateway readiness probe. */
 export type ReadinessResult = {
@@ -16,7 +17,16 @@ export type ReadinessResult = {
   failing: string[];
   uptimeMs: number;
   eventLoop?: GatewayEventLoopHealth;
+  /**
+   * Per-timer interval health (Gap 2 / ISSUE-109). Present whenever the
+   * gateway boot wires the interval-health registry; absent on older
+   * images so consumers must treat it as optional.
+   */
+  intervals?: Record<string, IntervalHealthSnapshot>;
 };
+
+/** Threshold for flipping eventLoop.degraded on stuck setInterval loops. */
+export const READINESS_MISSED_TICKS_DEGRADED_THRESHOLD = 3;
 
 /** Function form used by HTTP readiness endpoints and tests. */
 export type ReadinessChecker = () => ReadinessResult;
@@ -44,6 +54,12 @@ export function createReadinessChecker(deps: {
   getStartupPendingReason?: () => string | undefined;
   getGatewayDraining?: () => boolean;
   getEventLoopHealth?: () => GatewayEventLoopHealth | undefined;
+  /**
+   * Returns the gateway-wide interval-health registry. When wired, /readyz
+   * surfaces a per-timer `intervals` map and flips `eventLoop.degraded` to
+   * true whenever any registered timer has missed >= 3 ticks.
+   */
+  getIntervalHealth?: () => IntervalHealthRegistry | undefined;
   shouldSkipChannelReadiness?: () => boolean;
   cacheTtlMs?: number;
 }): ReadinessChecker {
@@ -57,9 +73,11 @@ export function createReadinessChecker(deps: {
     const uptimeMs = now - startedAt;
     if (deps.getStartupPending?.()) {
       const reason = deps.getStartupPendingReason?.() ?? "startup-sidecars";
-      return withEventLoopHealth(
+      return withReadinessExtras(
         { ready: false, failing: [reason], uptimeMs },
         deps.getEventLoopHealth,
+        deps.getIntervalHealth,
+        now,
       );
     }
     if (deps.getGatewayDraining?.()) {
@@ -69,10 +87,20 @@ export function createReadinessChecker(deps: {
       );
     }
     if (deps.shouldSkipChannelReadiness?.()) {
-      return withEventLoopHealth({ ready: true, failing: [], uptimeMs }, deps.getEventLoopHealth);
+      return withReadinessExtras(
+        { ready: true, failing: [], uptimeMs },
+        deps.getEventLoopHealth,
+        deps.getIntervalHealth,
+        now,
+      );
     }
     if (cachedState && now - cachedAt < cacheTtlMs) {
-      return withEventLoopHealth({ ...cachedState, uptimeMs }, deps.getEventLoopHealth);
+      return withReadinessExtras(
+        { ...cachedState, uptimeMs },
+        deps.getEventLoopHealth,
+        deps.getIntervalHealth,
+        now,
+      );
     }
 
     const snapshot = channelManager.getRuntimeSnapshot();
@@ -102,14 +130,36 @@ export function createReadinessChecker(deps: {
 
     cachedAt = now;
     cachedState = { ready: failing.length === 0, failing };
-    return withEventLoopHealth({ ...cachedState, uptimeMs }, deps.getEventLoopHealth);
+    return withReadinessExtras(
+      { ...cachedState, uptimeMs },
+      deps.getEventLoopHealth,
+      deps.getIntervalHealth,
+      now,
+    );
   };
 }
 
-function withEventLoopHealth(
+function withReadinessExtras(
   result: ReadinessResult,
   getEventLoopHealth?: () => GatewayEventLoopHealth | undefined,
+  getIntervalHealth?: () => IntervalHealthRegistry | undefined,
+  now: number = Date.now(),
 ): ReadinessResult {
   const eventLoop = getEventLoopHealth?.();
-  return eventLoop ? { ...result, eventLoop } : result;
+  const registry = getIntervalHealth?.();
+  let merged: ReadinessResult = result;
+  if (registry) {
+    const intervals = registry.snapshot(now);
+    if (Object.keys(intervals).length > 0) {
+      merged = { ...merged, intervals };
+    }
+    if (eventLoop && registry.hasMissedTicks(READINESS_MISSED_TICKS_DEGRADED_THRESHOLD, now)) {
+      merged = { ...merged, eventLoop: { ...eventLoop, degraded: true } };
+      return merged;
+    }
+  }
+  if (eventLoop) {
+    return { ...merged, eventLoop };
+  }
+  return merged;
 }

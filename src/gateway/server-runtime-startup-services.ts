@@ -7,6 +7,8 @@ import {
   createNoopHeartbeatRunner,
   type GatewayRuntimeServiceLogger,
 } from "./server-runtime-service-shared.js";
+import type { IntervalHealthRegistry } from "./server/interval-health.js";
+import type { GatewayMetricsCounters } from "./server/metrics.js";
 
 // Runtime startup services start only the background services needed by the
 // current gateway mode. Channel health is configurable; heartbeat/model pricing
@@ -19,6 +21,8 @@ export type GatewayChannelManager = Parameters<
 export function startGatewayChannelHealthMonitor(params: {
   cfg: OpenClawConfig;
   channelManager: GatewayChannelManager;
+  intervalHealth?: IntervalHealthRegistry;
+  metricsCounters?: Pick<GatewayMetricsCounters, "incChannelHealthTick">;
 }): ChannelHealthMonitor | null {
   const healthCheckMinutes = params.cfg.gateway?.channelHealthCheckMinutes;
   if (healthCheckMinutes === 0) {
@@ -33,6 +37,8 @@ export function startGatewayChannelHealthMonitor(params: {
       staleEventThresholdMs: staleEventThresholdMinutes * 60_000,
     }),
     ...(maxRestartsPerHour != null && { maxRestartsPerHour }),
+    ...(params.intervalHealth != null && { intervalHealth: params.intervalHealth }),
+    ...(params.metricsCounters != null && { metricsCounters: params.metricsCounters }),
   });
 }
 
@@ -42,6 +48,8 @@ export function startGatewayRuntimeServices(params: {
   cfgAtStart: OpenClawConfig;
   channelManager: GatewayChannelManager;
   log: GatewayRuntimeServiceLogger;
+  intervalHealth?: IntervalHealthRegistry;
+  metricsCounters?: Pick<GatewayMetricsCounters, "incChannelHealthTick">;
 }): {
   heartbeatRunner: ReturnType<typeof createNoopHeartbeatRunner>;
   channelHealthMonitor: ChannelHealthMonitor | null;
@@ -50,6 +58,8 @@ export function startGatewayRuntimeServices(params: {
   const channelHealthMonitor = startGatewayChannelHealthMonitor({
     cfg: params.cfgAtStart,
     channelManager: params.channelManager,
+    ...(params.intervalHealth != null && { intervalHealth: params.intervalHealth }),
+    ...(params.metricsCounters != null && { metricsCounters: params.metricsCounters }),
   });
 
   return {

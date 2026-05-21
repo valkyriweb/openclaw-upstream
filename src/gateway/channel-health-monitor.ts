@@ -11,6 +11,8 @@ import {
   type ChannelHealthPolicy,
 } from "./channel-health-policy.js";
 import type { ChannelManager } from "./server-channels.js";
+import type { IntervalHealthRegistry } from "./server/interval-health.js";
+import type { GatewayMetricsCounters } from "./server/metrics.js";
 
 const log = createSubsystemLogger("gateway/health-monitor");
 
@@ -45,6 +47,17 @@ type ChannelHealthMonitorDeps = {
   cooldownCycles?: number;
   maxRestartsPerHour?: number;
   abortSignal?: AbortSignal;
+  /**
+   * Optional interval-health registry. When wired, the monitor stamps
+   * `lastFiredAtMs` on every interval fire (Gap 2 / ISSUE-109) so `/readyz`
+   * can surface channel-health-monitor freshness.
+   */
+  intervalHealth?: IntervalHealthRegistry;
+  /**
+   * Optional metrics counters. When wired, every monitor tick increments
+   * `openclaw_channel_health_ticks_total` on `/metrics` (Gap 1 / ISSUE-108).
+   */
+  metricsCounters?: Pick<GatewayMetricsCounters, "incChannelHealthTick">;
 };
 
 export type ChannelHealthMonitor = {
@@ -83,9 +96,12 @@ export function startChannelHealthMonitor(deps: ChannelHealthMonitorDeps): Chann
     cooldownCycles = DEFAULT_COOLDOWN_CYCLES,
     maxRestartsPerHour = DEFAULT_MAX_RESTARTS_PER_HOUR,
     abortSignal,
+    intervalHealth,
+    metricsCounters,
   } = deps;
   const checkIntervalMs = resolveTimerTimeoutMs(deps.checkIntervalMs, DEFAULT_CHECK_INTERVAL_MS);
   const timing = resolveTimingPolicy(deps);
+  intervalHealth?.register("channelHealthMonitor", checkIntervalMs);
 
   const cooldownMs = cooldownCycles * checkIntervalMs;
   const restartRecords = new Map<string, RestartRecord>();
@@ -210,7 +226,11 @@ export function startChannelHealthMonitor(deps: ChannelHealthMonitorDeps): Chann
     stopped = true;
   } else {
     abortSignal?.addEventListener("abort", stop, { once: true });
-    timer = setInterval(() => void runCheck(), checkIntervalMs);
+    timer = setInterval(() => {
+      intervalHealth?.recordFire("channelHealthMonitor");
+      metricsCounters?.incChannelHealthTick();
+      void runCheck();
+    }, checkIntervalMs);
     if (typeof timer === "object" && "unref" in timer) {
       timer.unref();
     }

@@ -22,6 +22,7 @@ import { readCronRunLogEntriesSync } from "../cron/run-log.js";
 import type { CronRunLogEntry } from "../cron/run-log.js";
 import { loadCronJobsStoreSync, resolveCronJobsStorePath } from "../cron/store.js";
 import type { CronJob, CronStoreFile } from "../cron/types.js";
+import type { IntervalHealthRegistry } from "../gateway/server/interval-health.js";
 import { getAgentRunContext } from "../infra/agent-events.js";
 import { getSessionBindingService } from "../infra/outbound/session-binding-service.js";
 import { parseStrictNonNegativeInteger } from "../infra/parse-finite-number.js";
@@ -77,12 +78,24 @@ const TASK_STALE_RUNNING_MS = 30 * 60_000;
 const TASK_SWEEP_INTERVAL_MS = 60_000;
 
 /**
+ * Optional registry that records `taskSweep` interval freshness on every
+ * fire (Gap 2 / ISSUE-109). Wired by the gateway boot via
+ * `setTaskRegistryIntervalHealth()` before `startTaskRegistryMaintenance()`.
+ */
+let taskSweepIntervalHealth: IntervalHealthRegistry | undefined;
+
+/**
  * Number of tasks to process before yielding to the event loop.
  * Keeps the main thread responsive during large sweeps.
  */
 const SWEEP_YIELD_BATCH_SIZE = 25;
 
 let sweeper: NodeJS.Timeout | null = null;
+
+export function setTaskRegistryIntervalHealth(registry: IntervalHealthRegistry | undefined): void {
+  taskSweepIntervalHealth = registry;
+  registry?.register("taskSweep", TASK_SWEEP_INTERVAL_MS);
+}
 let deferredSweep: NodeJS.Timeout | null = null;
 let sweepInProgress = false;
 let configuredCronStorePath: string | undefined;
@@ -1093,6 +1106,7 @@ function yieldToEventLoop(): Promise<void> {
 }
 
 function startScheduledSweep() {
+  taskSweepIntervalHealth?.recordFire("taskSweep");
   if (sweepInProgress) {
     return;
   }

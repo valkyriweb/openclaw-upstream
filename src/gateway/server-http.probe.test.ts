@@ -315,6 +315,65 @@ describe("gateway probe endpoints", () => {
     });
   });
 
+  // ISSUE-109: per-timer interval health surfaced via /readyz.intervals.
+  it("surfaces intervals map on /readyz when the readiness checker emits it (Gap 2 / ISSUE-109)", async () => {
+    const getReadiness: ReadinessChecker = () => ({
+      ready: true,
+      failing: [],
+      uptimeMs: 30_000,
+      eventLoop: {
+        degraded: false,
+        reasons: [],
+        intervalMs: 30_000,
+        delayP99Ms: 1,
+        delayMaxMs: 2,
+        utilization: 0.001,
+        cpuCoreRatio: 0.002,
+      },
+      intervals: {
+        tick: { intervalMs: 30_000, lastFiredAtMs: 1_700_000_000_000, missedTicks: 0 },
+        healthRefresh: { intervalMs: 60_000, lastFiredAtMs: 1_700_000_000_000, missedTicks: 0 },
+        dedupeCleanup: { intervalMs: 60_000, lastFiredAtMs: 1_700_000_000_000, missedTicks: 0 },
+        mediaCleanup: { intervalMs: 3_600_000, lastFiredAtMs: 1_700_000_000_000, missedTicks: 0 },
+        taskSweep: { intervalMs: 60_000, lastFiredAtMs: 1_700_000_000_000, missedTicks: 0 },
+        channelHealthMonitor: {
+          intervalMs: 300_000,
+          lastFiredAtMs: 1_700_000_000_000,
+          missedTicks: 0,
+        },
+      },
+    });
+
+    await withGatewayServer({
+      prefix: "probe-readyz-intervals",
+      resolvedAuth: AUTH_NONE,
+      overrides: { getReadiness },
+      run: async (server) => {
+        const req = createRequest({ path: "/readyz" });
+        const { res, getBody } = createResponse();
+        await dispatchRequest(server, req, res);
+        expect(res.statusCode).toBe(200);
+        const body = JSON.parse(getBody());
+        expect(body.intervals).toBeDefined();
+        for (const name of [
+          "tick",
+          "healthRefresh",
+          "dedupeCleanup",
+          "mediaCleanup",
+          "taskSweep",
+          "channelHealthMonitor",
+        ]) {
+          expect(body.intervals[name]).toMatchObject({
+            intervalMs: expect.any(Number),
+            lastFiredAtMs: expect.any(Number),
+            missedTicks: expect.any(Number),
+          });
+        }
+        expect(body.eventLoop.degraded).toBe(false);
+      },
+    });
+  });
+
   it("reflects readiness status on HEAD /readyz without a response body", async () => {
     const getReadiness: ReadinessChecker = () => ({
       ready: false,

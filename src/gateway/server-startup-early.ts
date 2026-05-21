@@ -4,6 +4,7 @@ import type { GatewayTailscaleMode } from "../config/types.gateway.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveCronJobsStorePath } from "../cron/store.js";
 import type { PluginRegistry } from "../plugins/registry-types.js";
+import type { IntervalHealthRegistry } from "./server/interval-health.js";
 
 type Awaitable<T> = T | Promise<T>;
 
@@ -109,6 +110,13 @@ export async function startGatewayEarlyRuntime(params: {
   setSkillsRefreshTimer: (timer: ReturnType<typeof setTimeout> | null) => void;
   getRuntimeConfig: () => OpenClawConfig;
   startupTrace?: GatewayStartupTrace;
+  /**
+   * Optional interval-health registry. When supplied, the task-registry
+   * sweeper and gateway maintenance timers stamp `lastFiredAtMs` on every
+   * fire so `/readyz.intervals` (Gap 2 / ISSUE-109) reports per-timer
+   * freshness. Wired by the gateway boot site (`server.impl.ts`).
+   */
+  intervalHealth?: IntervalHealthRegistry;
 }) {
   const bonjourStop = await measureStartup(params.startupTrace, "runtime.early.discovery", () =>
     startGatewayPluginDiscovery(params),
@@ -139,6 +147,9 @@ export async function startGatewayEarlyRuntime(params: {
       cronStorePath: resolveCronJobsStorePath(params.cfgAtStart.cron?.store),
       runtimeAuthoritative: true,
     });
+    if (params.intervalHealth) {
+      taskRegistryMaintenance.setTaskRegistryIntervalHealth(params.intervalHealth);
+    }
     taskRegistryMaintenance.startTaskRegistryMaintenance();
     getActiveTaskCount = () =>
       taskRegistryMaintenance.getInspectableActiveTaskRestartBlockers().length;
@@ -198,6 +209,7 @@ export async function startGatewayEarlyRuntime(params: {
         ...(typeof params.mediaCleanupTtlMs === "number"
           ? { mediaCleanupTtlMs: params.mediaCleanupTtlMs }
           : {}),
+        ...(params.intervalHealth != null && { intervalHealth: params.intervalHealth }),
       });
     });
   };
