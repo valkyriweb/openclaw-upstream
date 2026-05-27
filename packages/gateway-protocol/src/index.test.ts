@@ -4,6 +4,7 @@ import { TALK_TEST_PROVIDER_ID } from "../../../src/test-utils/talk-test-provide
 import * as protocol from "./index.js";
 import {
   formatValidationErrors,
+  validateAgentParams,
   validateChatAbortParams,
   validateChatHistoryParams,
   validateChatMetadataParams,
@@ -642,6 +643,34 @@ describe("validateTalkSessionRelayParams", () => {
         options: { suppressResponse: true, willContinue: true },
       }),
     ).toBe(true);
+  });
+});
+
+describe("validateAgentParams", () => {
+  it("accepts Paperclip gateway metadata while keeping unknown root fields rejected", () => {
+    expect(
+      validateAgentParams({
+        message: "Handle SMI-113",
+        sessionKey: "agent:smilerite:paperclip:issue:16217004-1cf6-44d4-9ca5-893934227a64",
+        idempotencyKey: "70c0afd0-b7c3-4529-91d1-318db81f4a3a",
+        agentId: "smilerite",
+        timeout: 300000,
+        paperclip: {
+          runId: "70c0afd0-b7c3-4529-91d1-318db81f4a3a",
+          companyId: "668a67d2-d03e-458c-a0cc-f7c1a8962c9c",
+          issueId: "16217004-1cf6-44d4-9ca5-893934227a64",
+          wake: { reason: "source_scoped_recovery_action" },
+        },
+      }),
+    ).toBe(true);
+
+    expect(
+      validateAgentParams({
+        message: "Handle SMI-113",
+        idempotencyKey: "70c0afd0-b7c3-4529-91d1-318db81f4a3a",
+        somethingElse: true,
+      }),
+    ).toBe(false);
   });
 });
 

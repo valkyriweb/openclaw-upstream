@@ -233,6 +233,10 @@ export const AgentParamsSchema = Type.Object(
     ),
     disableMessageTool: Type.Optional(Type.Boolean()),
     voiceWakeTrigger: Type.Optional(Type.String()),
+    // Paperclip's openclaw_gateway adapter sends standardized run context at
+    // the root of gateway agent requests. Accept it as opaque metadata while
+    // keeping the rest of the schema strict.
+    paperclip: Type.Optional(Type.Unknown()),
     idempotencyKey: NonEmptyString,
     label: Type.Optional(SessionLabelString),
   },
