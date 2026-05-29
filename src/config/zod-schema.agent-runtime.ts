@@ -812,6 +812,16 @@ const AgentToolsSchema = z
     exec: AgentToolExecSchema,
     fs: ToolFsSchema,
     loopDetection: ToolLoopDetectionSchema,
+    // ISSUE-040: per-agent session-tools visibility override (mirror of global tools.sessions).
+    // Reader is resolveSessionToolsVisibility (src/plugin-sdk/session-visibility.ts); without
+    // this schema entry strict validation rejects agents.list[].tools.sessions and the loader
+    // strips it on normalize, so the override silently reverts on restart.
+    sessions: z
+      .object({
+        visibility: z.enum(["self", "tree", "agent", "all"]).optional(),
+      })
+      .strict()
+      .optional(),
     message: MessageToolConfigSchema,
     sandbox: z
       .object({
