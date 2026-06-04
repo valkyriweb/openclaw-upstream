@@ -1,0 +1,52 @@
+{
+  "id": "pi-fork",
+  "name": "Pi Fork",
+  "description": "Routes OpenClaw agent turns through the Pi coding-agent RPC runtime.",
+  "providers": ["pi-fork"],
+  "syntheticAuthRefs": ["pi-fork"],
+  "activation": {
+    "onStartup": false,
+    "onAgentHarnesses": ["pi-fork"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "command": { "type": "string" },
+      "args": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": []
+      },
+      "turnTimeoutMs": {
+        "type": "number",
+        "minimum": 1,
+        "default": 300000
+      },
+      "promptContextMode": {
+        "type": "string",
+        "enum": ["full", "lean-automation"],
+        "default": "full"
+      },
+      "leanPromptTriggers": {
+        "type": "array",
+        "items": { "type": "string", "enum": ["heartbeat", "cron"] }
+      },
+      "compactionTriggerTokens": {
+        "type": "number",
+        "minimum": 1
+      },
+      "piMonoForkSource": { "type": "string" },
+      "piMonoForkRef": { "type": "string" },
+      "piMonoForkRuntimeDir": { "type": "string" },
+      "piMonoForkAutoInstall": {
+        "type": "boolean",
+        "default": true
+      },
+      "myPiHarnessPackagePath": { "type": "string" },
+      "authProfilesPath": { "type": "string" },
+      "piAuthPath": { "type": "string" },
+      "piAgentDir": { "type": "string" }
+    }
+  }
+}
