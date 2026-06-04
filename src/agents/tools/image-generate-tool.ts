@@ -395,12 +395,12 @@ function normalizeOpenAIOutputCompression(
   raw: Record<string, unknown>,
   outputFormat: ImageGenerationOutputFormat | undefined,
 ): number | undefined {
-  const outputCompression = readNumberParam(raw, "outputCompression", { integer: true });
+  const outputCompression = readNonNegativeIntegerParam(raw, "outputCompression", {
+    max: 100,
+    message: "openai.outputCompression must be between 0 and 100",
+  });
   if (outputCompression === undefined) {
     return undefined;
-  }
-  if (outputCompression < 0 || outputCompression > 100) {
-    throw new ToolInputError("openai.outputCompression must be between 0 and 100");
   }
   if (outputFormat === "png") {
     return undefined;
