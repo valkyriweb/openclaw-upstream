@@ -1299,6 +1299,16 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
 
+  extensions/pi-fork:
+    dependencies:
+      openclaw:
+        specifier: workspace:*
+        version: link:../..
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   extensions/pixverse:
     devDependencies:
       '@openclaw/plugin-sdk':
