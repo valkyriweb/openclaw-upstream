@@ -10,6 +10,7 @@ type DiagnosticSessionRecoverySkipReason =
   | "active_lane_task"
   | "already_in_flight"
   | "missing_session_ref"
+  | "post_recovery_cooldown"
   | "stale_session_state";
 
 type DiagnosticSessionRecoveryNoopReason = "no_active_work";

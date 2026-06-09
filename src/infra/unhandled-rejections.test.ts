@@ -330,10 +330,16 @@ describe("isTransientFileWatchError", () => {
 });
 
 describe("isTransientUnhandledRejectionError", () => {
-  it("treats raw pre-connect network uncaught exceptions as benign", () => {
+  it("treats pre-connect and mid-stream socket-drop network uncaught exceptions as benign", () => {
     const epipe = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
     const sqlite = Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+    // Mid-stream reset on an established connection — benign since ISSUE-137 (was fatal before).
     const network = Object.assign(new Error("connection reset"), { code: "ECONNRESET" });
+    // Regression: exact 2026-06-09 crash shape — undici body half-close surfaced as an
+    // uncaught TypeError("terminated") with the real code on .cause. Must NOT crash the gateway.
+    const undiciTerminated = Object.assign(new TypeError("terminated"), {
+      cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }),
+    });
     const networkDown = Object.assign(new Error("connect ENETDOWN"), {
       code: "ENETDOWN",
     });
@@ -368,7 +374,8 @@ describe("isTransientUnhandledRejectionError", () => {
 
     expect(isBenignUncaughtExceptionError(epipe)).toBe(true);
     expect(isBenignUncaughtExceptionError(sqlite)).toBe(false);
-    expect(isBenignUncaughtExceptionError(network)).toBe(false);
+    expect(isBenignUncaughtExceptionError(network)).toBe(true);
+    expect(isBenignUncaughtExceptionError(undiciTerminated)).toBe(true);
     expect(isBenignUncaughtExceptionError(networkDown)).toBe(true);
     expect(isBenignUncaughtExceptionError(rawNetworkDown)).toBe(true);
     expect(isBenignUncaughtExceptionError(hostUnreachable)).toBe(true);
