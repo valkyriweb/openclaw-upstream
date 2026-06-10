@@ -40,6 +40,37 @@ describe("dispatchPiRpcJsonlChunk", () => {
     expect(events).toEqual([{ type: "response", success: true }]);
     expect(state.buffer).toBe("");
   });
+
+  it("keeps dispatching after malformed JSONL lines and counts parse errors", () => {
+    const events: Record<string, unknown>[] = [];
+    const listeners = new Set<(event: Record<string, unknown>) => void>([
+      (event) => events.push(event),
+    ]);
+    const state: { buffer: string; parseErrors?: number } = { buffer: "" };
+
+    dispatchPiRpcJsonlChunk(state, 'not-json\n{"type":"ok"}\nalso { broken\n', listeners, {
+      sessionId: "parse-error-test",
+    });
+
+    expect(events).toEqual([{ type: "ok" }]);
+    expect(state.parseErrors).toBe(2);
+  });
+
+  it("keeps dispatching to later listeners when an earlier listener throws", () => {
+    const events: Record<string, unknown>[] = [];
+    const throwing = () => {
+      throw new Error("listener boom");
+    };
+    const listeners = new Set<(event: Record<string, unknown>) => void>([
+      throwing,
+      (event) => events.push(event),
+    ]);
+    const state = { buffer: "" };
+
+    dispatchPiRpcJsonlChunk(state, '{"type":"ok"}\n', listeners);
+
+    expect(events).toEqual([{ type: "ok" }]);
+  });
 });
 
 describe("buildPiRpcArgv", () => {
