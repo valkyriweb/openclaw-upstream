@@ -43,6 +43,33 @@ export interface PiHarnessConfig {
   piAuthPath?: string;
   /** Pi agent config directory. Defaults to the parent directory of piAuthPath. */
   piAgentDir?: string;
+  /**
+   * Native pi tool aliases to drop in the spawned pi (written to settings.json
+   * as `extensions.native-tool-overrides.exclude`, read by the my-pi
+   * native-tool-overrides extension). Default: ["Agent"] — pi sub-agents cost
+   * ~140k tokens/session and are not used by OpenClaw-driven turns.
+   */
+  nativeToolExclude?: string[];
+  /**
+   * Static catalog of OpenClaw tools to surface inside the spawned pi as
+   * provider-native deferred proxy tools (progressive disclosure via
+   * tool-search). Serialized verbatim into settings.json under
+   * `extensions.openclaw-adaptor.tools` and registered by the my-pi
+   * openclaw-adaptor extension. Each entry names a backing MCP server + remote
+   * tool; execution shells out to `adaptorExec` (mcporter by default).
+   */
+  adaptorTools?: Array<{
+    name: string;
+    server: string;
+    tool: string;
+    description?: string;
+    label?: string;
+    inputSchema?: Record<string, unknown>;
+  }>;
+  /** Execution command for adaptor tools. Placeholders: {server} {tool} {args}. */
+  adaptorExec?: { command?: string; args?: string[] };
+  /** Per-call timeout (ms) for adaptor tool execution. */
+  adaptorTimeoutMs?: number;
 }
 
 /** Well-known fallback locations for the pi binary, in preference order. */

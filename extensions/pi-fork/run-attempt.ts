@@ -15,6 +15,7 @@ import type {
   AgentHarnessAttemptParams,
   AgentHarnessAttemptResult,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
+import { resolveAgentHarnessBeforePromptBuildResult as resolveBeforePromptBuild } from "openclaw/plugin-sdk/agent-harness-runtime";
 import type { PiHarnessConfig } from "./config.js";
 import { buildPiRpcPrompt } from "./prompt-contract.js";
 import { clearPiProcess, getOrCreatePiProcess, type PiRpcProcess } from "./session-binding.js";
@@ -300,6 +301,33 @@ export function buildPiPromptCommand(
   };
 }
 
+type PromptBuildAttemptParams = AgentHarnessAttemptParams & {
+  prompt?: string;
+  extraSystemPrompt?: string;
+};
+
+async function buildHookedPiPromptCommand(
+  params: AgentHarnessAttemptParams,
+  config: PiHarnessConfig,
+): Promise<PiPromptCommand> {
+  const shaped = params as PromptBuildAttemptParams;
+  const promptBuild = await resolveBeforePromptBuild({
+    prompt: shaped.prompt ?? "",
+    developerInstructions: shaped.extraSystemPrompt,
+    messages: [],
+    ctx: params,
+  });
+
+  return buildPiPromptCommand(
+    {
+      ...params,
+      prompt: promptBuild.prompt,
+      extraSystemPrompt: promptBuild.developerInstructions,
+    } as AgentHarnessAttemptParams,
+    config,
+  );
+}
+
 export async function runPiRpcAttempt(
   params: AgentHarnessAttemptParams,
   config: PiHarnessConfig,
@@ -330,6 +358,8 @@ export async function runPiRpcAttempt(
       promptError: err,
     });
   }
+
+  const promptCommand = await buildHookedPiPromptCommand(params, config);
 
   return new Promise<AgentHarnessAttemptResult>((resolve) => {
     let assistantText = "";
@@ -552,6 +582,6 @@ export async function runPiRpcAttempt(
     }, turnTimeoutMs);
 
     // Send the prompt
-    piProcess.send(buildPiPromptCommand(params, config));
+    piProcess.send(promptCommand);
   });
 }

@@ -166,6 +166,43 @@ function syncOpenAiCodexAuth(config: PiHarnessConfig): void {
   writeFileSync(targetPath, JSON.stringify(existing, null, 2) + "\n", { mode: 0o600 });
 }
 
+/**
+ * Static, cache-stable config object for my-pi extensions in the spawned pi.
+ *
+ * OpenClaw owns these catalogs in-process, so it serializes them synchronously
+ * into settings.json at spawn (no async tools/list handshake, deterministic
+ * lex-sorted ordering). Read by native-tool-overrides + openclaw-adaptor.
+ */
+function buildPiHarnessExtensionSettings(config: PiHarnessConfig): Record<string, unknown> {
+  const exclude = config.nativeToolExclude ?? ["Agent"];
+  const settings: Record<string, unknown> = {
+    "native-tool-overrides": { exclude },
+  };
+
+  const tools = Array.isArray(config.adaptorTools)
+    ? config.adaptorTools
+        .filter(
+          (t) =>
+            t &&
+            typeof t.name === "string" &&
+            typeof t.server === "string" &&
+            typeof t.tool === "string",
+        )
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+    : [];
+  if (tools.length > 0) {
+    settings["openclaw-adaptor"] = {
+      tools,
+      ...(config.adaptorExec ? { exec: config.adaptorExec } : {}),
+      ...(typeof config.adaptorTimeoutMs === "number"
+        ? { timeoutMs: config.adaptorTimeoutMs }
+        : {}),
+    };
+  }
+  return settings;
+}
+
 export function resolvePiAgentDir(config: PiHarnessConfig): string {
   if (config.piAgentDir?.trim()) {
     return config.piAgentDir;
@@ -203,6 +240,7 @@ export function ensurePiHarnessAgentSettings(config: PiHarnessConfig): string {
         defaultThinkingLevel: "off",
         enabledModels: ["claude-bridge/*", "openai-codex/*", "openai/*"],
         packages: [packagePath],
+        extensions: buildPiHarnessExtensionSettings(config),
       },
       null,
       2,

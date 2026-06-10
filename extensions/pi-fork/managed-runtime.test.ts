@@ -54,10 +54,13 @@ describe("ensurePiHarnessAgentSettings", () => {
     expect(settingsPath).toBe(join(piAgentDir, "settings.json"));
     expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toEqual({
       defaultProvider: "claude-bridge",
-      defaultModel: "claude-opus-4-7",
+      defaultModel: "claude-opus-4-8",
       defaultThinkingLevel: "off",
-      enabledModels: ["claude-bridge/*"],
+      enabledModels: ["claude-bridge/*", "openai-codex/*", "openai/*"],
       packages: [packageDir],
+      extensions: {
+        "native-tool-overrides": { exclude: ["Agent"] },
+      },
     });
     const modelsPath = join(piAgentDir, "models.json");
     expect(existsSync(modelsPath)).toBe(true);
@@ -65,7 +68,14 @@ describe("ensurePiHarnessAgentSettings", () => {
       providers: {
         "claude-bridge": {
           baseUrl: "http://127.0.0.1:9100",
-          models: [{ id: "claude-opus-4-7" }],
+          models: [{ id: "claude-opus-4-8" }],
+        },
+        "openai-codex": {
+          api: "openai-codex-responses",
+          models: [{ id: "gpt-5.5" }, { id: "gpt-5.4" }, ...Array(4).fill({})],
+        },
+        openai: {
+          api: "openai-codex-responses",
         },
       },
     });
