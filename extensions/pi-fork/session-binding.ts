@@ -7,9 +7,15 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import crypto from "node:crypto";
+import { embeddedAgentLog } from "openclaw/plugin-sdk/agent-harness-runtime";
 import type { PiHarnessConfig } from "./config.js";
 import { resolvePiCommand } from "./config.js";
 import { ensurePiHarnessAgentSettings, resolvePiAgentDir } from "./managed-runtime.js";
+
+const STDERR_TAIL_MAX_LINES = 50;
+const STDERR_TAIL_MAX_LINE_CHARS = 500;
+const PARSE_ERROR_LOG_LIMIT = 5;
+const KILL_ESCALATION_MS = 3_000;
 
 function resolvePiAgentEnv(config: PiHarnessConfig): NodeJS.ProcessEnv {
   ensurePiHarnessAgentSettings(config);
@@ -31,6 +37,10 @@ export type PiRpcProcess = {
   /** Listeners called for each parsed event/response line */
   listeners: Set<(event: Record<string, unknown>) => void>;
   onClose: Set<() => void>;
+  /** True while an OpenClaw turn owns this process (prompt sent, no terminal event yet). */
+  turnActive: boolean;
+  /** Ring buffer of recent stderr lines for post-mortem on silent failures. */
+  stderrTail: string[];
 };
 
 type PiRpcResponse = {
@@ -101,9 +111,10 @@ function extensionArgsFromEnv(raw: string | undefined): string[] {
 }
 
 export function dispatchPiRpcJsonlChunk(
-  state: { buffer: string },
+  state: { buffer: string; parseErrors?: number },
   chunk: string,
   listeners: Set<(event: Record<string, unknown>) => void>,
+  context?: { sessionId?: string },
 ): void {
   state.buffer += chunk;
   while (true) {
@@ -116,26 +127,74 @@ export function dispatchPiRpcJsonlChunk(
     if (!line) {
       continue;
     }
+    let parsed: Record<string, unknown>;
     try {
-      const parsed = JSON.parse(line) as Record<string, unknown>;
-      for (const listener of listeners) {
-        try {
-          listener(parsed);
-        } catch {}
+      parsed = JSON.parse(line) as Record<string, unknown>;
+    } catch (err) {
+      state.parseErrors = (state.parseErrors ?? 0) + 1;
+      if (state.parseErrors <= PARSE_ERROR_LOG_LIMIT) {
+        embeddedAgentLog.warn("pi-fork rpc stdout line is not valid JSONL", {
+          sessionId: context?.sessionId,
+          parseErrors: state.parseErrors,
+          linePreview: line.slice(0, 200),
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
-    } catch {}
+      continue;
+    }
+    for (const listener of listeners) {
+      try {
+        listener(parsed);
+      } catch (err) {
+        embeddedAgentLog.warn("pi-fork rpc event listener threw", {
+          sessionId: context?.sessionId,
+          eventType: typeof parsed.type === "string" ? parsed.type : undefined,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   }
 }
 
 function bindPiRpcJsonlStdout(
   stdout: NodeJS.ReadableStream,
   listeners: Set<(event: Record<string, unknown>) => void>,
+  context: { sessionId: string },
 ): void {
   const state = { buffer: "" };
   stdout.setEncoding("utf8");
   stdout.on("data", (chunk) => {
-    dispatchPiRpcJsonlChunk(state, String(chunk), listeners);
+    dispatchPiRpcJsonlChunk(state, String(chunk), listeners, context);
   });
+}
+
+function bindPiStderrTail(stderr: NodeJS.ReadableStream, tail: string[]): void {
+  const state = { buffer: "" };
+  stderr.setEncoding("utf8");
+  stderr.on("data", (chunk) => {
+    state.buffer += String(chunk);
+    while (true) {
+      const newlineIndex = state.buffer.indexOf("\n");
+      if (newlineIndex === -1) {
+        return;
+      }
+      const line = state.buffer.slice(0, newlineIndex).replace(/\r$/u, "");
+      state.buffer = state.buffer.slice(newlineIndex + 1);
+      if (!line) {
+        continue;
+      }
+      tail.push(line.slice(0, STDERR_TAIL_MAX_LINE_CHARS));
+      if (tail.length > STDERR_TAIL_MAX_LINES) {
+        tail.shift();
+      }
+    }
+  });
+}
+
+export function formatPiStderrTail(piProcess: Pick<PiRpcProcess, "stderrTail">): string {
+  return piProcess.stderrTail.length > 0
+    ? `; recent pi stderr:\n${piProcess.stderrTail.slice(-10).join("\n")}`
+    : "";
 }
 
 /**
@@ -202,13 +261,28 @@ export async function getOrCreatePiProcess(
   };
 
   const send: PiRpcSendFn = (obj) => {
-    if (proc.stdin && !proc.stdin.destroyed) {
+    if (!proc.stdin || proc.stdin.destroyed) {
+      embeddedAgentLog.warn("pi-fork rpc send skipped: stdin unavailable", {
+        sessionId: openclaSessionId,
+        commandType: (obj as { type?: unknown })?.type,
+      });
+      return;
+    }
+    try {
       proc.stdin.write(JSON.stringify(obj) + "\n");
+    } catch (err) {
+      // EPIPE and friends: pi died between the destroyed check and the write.
+      embeddedAgentLog.warn("pi-fork rpc send failed", {
+        sessionId: openclaSessionId,
+        commandType: (obj as { type?: unknown })?.type,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   };
 
+  const stderrTail: string[] = [];
   if (proc.stdout) {
-    bindPiRpcJsonlStdout(proc.stdout, listeners);
+    bindPiRpcJsonlStdout(proc.stdout, listeners, { sessionId: openclaSessionId });
     proc.stdout.on("close", notifyClose);
   }
 
@@ -216,7 +290,17 @@ export async function getOrCreatePiProcess(
     notifyClose();
   });
 
-  proc.stderr?.resume(); // drain stderr so the process doesn't block
+  if (proc.stderr) {
+    bindPiStderrTail(proc.stderr, stderrTail);
+  }
+  // Swallow async stdin errors (EPIPE after pi exit) so they cannot become
+  // uncaught stream exceptions in the gateway process.
+  proc.stdin?.on("error", (err) => {
+    embeddedAgentLog.warn("pi-fork rpc stdin stream error", {
+      sessionId: openclaSessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 
   // Read the pi session ID once it starts (pi emits state on startup via get_state)
   // We'll query it after spawn
@@ -229,6 +313,8 @@ export async function getOrCreatePiProcess(
     requestedWorkspaceDir,
     listeners,
     onClose,
+    turnActive: false,
+    stderrTail,
   };
 
   bindings.set(openclaSessionId, binding);
@@ -250,6 +336,16 @@ export function clearPiProcess(openclaSessionId: string): void {
   try {
     binding.proc.kill("SIGTERM");
   } catch {}
+  // A pi process wedged in a tool call can ignore SIGTERM; escalate so a dead
+  // session can never leak a live child that keeps streaming into old listeners.
+  const escalation = setTimeout(() => {
+    if (binding.proc.exitCode === null && binding.proc.signalCode === null) {
+      try {
+        binding.proc.kill("SIGKILL");
+      } catch {}
+    }
+  }, KILL_ESCALATION_MS);
+  escalation.unref?.();
 }
 
 /**

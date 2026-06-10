@@ -15,12 +15,32 @@ import type {
   AgentHarnessAttemptParams,
   AgentHarnessAttemptResult,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
-import { resolveAgentHarnessBeforePromptBuildResult as resolveBeforePromptBuild } from "openclaw/plugin-sdk/agent-harness-runtime";
+import {
+  clearActiveEmbeddedRun,
+  embeddedAgentLog,
+  resolveAgentHarnessBeforePromptBuildResult as resolveBeforePromptBuild,
+  setActiveEmbeddedRun,
+} from "openclaw/plugin-sdk/agent-harness-runtime";
+import { emitTrustedDiagnosticEvent } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { PiHarnessConfig } from "./config.js";
 import { buildPiRpcPrompt } from "./prompt-contract.js";
-import { clearPiProcess, getOrCreatePiProcess, type PiRpcProcess } from "./session-binding.js";
+import {
+  clearPiProcess,
+  formatPiStderrTail,
+  getOrCreatePiProcess,
+  sendPiRpcCommand,
+  type PiRpcProcess,
+} from "./session-binding.js";
 
 const DEFAULT_TURN_TIMEOUT_MS = 5 * 60 * 1_000; // 5 minutes
+/** How long an externally-aborted pi turn may keep running before the process is replaced. */
+const ABORT_SETTLE_MS = 10_000;
+/** Ack timeout for steering messages injected into an active pi turn. */
+const STEER_ACK_TIMEOUT_MS = 10_000;
+/** Floor between run-progress signals so streaming deltas don't flood diagnostics. */
+const PROGRESS_THROTTLE_MS = 1_000;
+/** Cap on unknown-event debug logs per turn. */
+const UNKNOWN_EVENT_LOG_LIMIT = 5;
 
 function normalizePositiveTimeoutMs(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0
@@ -313,7 +333,7 @@ async function buildHookedPiPromptCommand(
   const shaped = params as PromptBuildAttemptParams;
   const promptBuild = await resolveBeforePromptBuild({
     prompt: shaped.prompt ?? "",
-    developerInstructions: shaped.extraSystemPrompt,
+    developerInstructions: shaped.extraSystemPrompt ?? "",
     messages: [],
     ctx: params,
   });
@@ -328,24 +348,55 @@ async function buildHookedPiPromptCommand(
   );
 }
 
+type RunProgressInfo = {
+  reason: string;
+  provider?: string;
+  model?: string;
+  backend?: string;
+};
+
+type ShapedAttemptParams = {
+  sessionId?: string;
+  sessionKey?: string;
+  sessionFile?: string;
+  runId?: string;
+  modelId?: string;
+  provider?: string;
+  workspaceDir?: string;
+  abortSignal?: AbortSignal;
+  onRunProgress?: (info: RunProgressInfo) => void;
+  sourceReplyDeliveryMode?: "automatic" | "message_tool_only";
+};
+
 export async function runPiRpcAttempt(
   params: AgentHarnessAttemptParams,
   config: PiHarnessConfig,
 ): Promise<AgentHarnessAttemptResult> {
   const turnTimeoutMs = resolvePiTurnTimeoutMs(params, config);
-  const sessionId =
-    (params as unknown as { sessionId?: string }).sessionId ??
-    (params as unknown as { sessionKey?: string }).sessionKey ??
-    crypto.randomUUID();
+  const shaped = params as unknown as ShapedAttemptParams;
+  const sessionId = shaped.sessionId ?? shaped.sessionKey ?? crypto.randomUUID();
+  const sessionKey = shaped.sessionKey;
+  const spawnOpts = {
+    config,
+    modelId: shaped.modelId,
+    provider: shaped.provider,
+    workspaceDir: shaped.workspaceDir,
+  };
 
   let piProcess: PiRpcProcess;
   try {
-    piProcess = await getOrCreatePiProcess(sessionId, {
-      config,
-      modelId: (params as unknown as { modelId?: string }).modelId,
-      provider: (params as unknown as { provider?: string }).provider,
-      workspaceDir: (params as unknown as { workspaceDir?: string }).workspaceDir,
-    });
+    piProcess = await getOrCreatePiProcess(sessionId, spawnOpts);
+    if (piProcess.turnActive) {
+      // The session lane serializes legitimate turns, so an already-active
+      // marker here means a zombie turn still owns this binding (e.g. an abort
+      // pi never honored). Replace the process rather than share its stream.
+      embeddedAgentLog.warn("pi-fork binding still turn-active at attempt start; respawning", {
+        sessionId,
+        sessionKey,
+      });
+      clearPiProcess(sessionId);
+      piProcess = await getOrCreatePiProcess(sessionId, spawnOpts);
+    }
   } catch (err) {
     return buildAttemptResult({
       assistantText: "",
@@ -370,8 +421,54 @@ export async function runPiRpcAttempt(
     let promptErrored = false;
     let promptErrorMsg = "";
     let done = false;
+    let healed = false;
+    let unknownEventCount = 0;
+    let lastProgressAt = 0;
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     let closeHandler: (() => void) | undefined;
+
+    // Feed both liveness clocks while pi works: the command-lane task timeout
+    // (params.onRunProgress -> noteLaneTaskProgress) and the stuck-session
+    // detector (run.progress diagnostic events -> diagnostic-run-activity).
+    // Without these, any turn longer than diagnostics.stuckSessionAbortMs with
+    // queued messages behind it is classified stalled and watchdog-aborted.
+    const touchProgress = (reason: string, opts?: { force?: boolean }) => {
+      const now = Date.now();
+      if (!opts?.force && now - lastProgressAt < PROGRESS_THROTTLE_MS) {
+        return;
+      }
+      lastProgressAt = now;
+      try {
+        shaped.onRunProgress?.({
+          reason,
+          provider: shaped.provider,
+          model: shaped.modelId,
+          backend: "pi-fork-rpc",
+        });
+      } catch {}
+      try {
+        emitTrustedDiagnosticEvent({
+          type: "run.progress",
+          runId: shaped.runId,
+          sessionId,
+          sessionKey,
+          reason: `pi_fork:${reason}`,
+        });
+      } catch {}
+    };
+
+    const attachTurn = () => {
+      piProcess.listeners.add(onEvent);
+      if (closeHandler) {
+        piProcess.onClose.add(closeHandler);
+      }
+    };
+    const detachTurn = () => {
+      piProcess.listeners.delete(onEvent);
+      if (closeHandler) {
+        piProcess.onClose.delete(closeHandler);
+      }
+    };
 
     const finish = (opts: {
       aborted?: boolean;
@@ -380,6 +477,8 @@ export async function runPiRpcAttempt(
       promptError?: unknown;
       /** If true, query pi for authoritative final text before resolving. */
       queryFinalText?: boolean;
+      /** Keep turnActive set; an abort-settle watcher owns the binding state. */
+      deferTurnRelease?: boolean;
     }) => {
       if (done) {
         return;
@@ -388,10 +487,11 @@ export async function runPiRpcAttempt(
       if (timeoutHandle) {
         clearTimeout(timeoutHandle);
       }
-      piProcess.listeners.delete(onEvent);
-      if (closeHandler) {
-        piProcess.onClose.delete(closeHandler);
-        closeHandler = undefined;
+      detachTurn();
+      closeHandler = undefined;
+      clearActiveEmbeddedRun(sessionId, queueHandle, sessionKey, shaped.sessionFile);
+      if (!opts.deferTurnRelease) {
+        piProcess.turnActive = false;
       }
 
       const resolveResult = (finalText: string, finalMessages: unknown[]) => {
@@ -481,6 +581,33 @@ export async function runPiRpcAttempt(
       }
     };
 
+    // Heal a binding whose pi rejected our prompt because a previous turn is
+    // still running inside it (zombie after an unhonored abort). The session
+    // lane guarantees no legitimate concurrent turn, so replacing the process
+    // and resending once is deterministic recovery instead of a dropped reply.
+    const healBusyBindingAndResend = async () => {
+      touchProgress("busy_heal_respawn", { force: true });
+      embeddedAgentLog.warn("pi-fork prompt rejected: pi busy with zombie turn; respawning", {
+        sessionId,
+        sessionKey,
+      });
+      detachTurn();
+      clearPiProcess(sessionId);
+      try {
+        piProcess = await getOrCreatePiProcess(sessionId, spawnOpts);
+      } catch (err) {
+        finish({ promptError: err });
+        return;
+      }
+      if (done) {
+        piProcess.turnActive = false;
+        return;
+      }
+      attachTurn();
+      piProcess.turnActive = true;
+      piProcess.send(promptCommand);
+    };
+
     const onEvent = (event: Record<string, unknown>) => {
       if (done) {
         return;
@@ -490,6 +617,7 @@ export async function runPiRpcAttempt(
 
       if (type === "message_update" || type === "message_start" || type === "message_end") {
         const e = event as unknown as PiMessageEvent;
+        touchProgress("assistant_stream");
         if (e.message?.role === "assistant") {
           if (e.message.stopReason === "error") {
             promptErrored = true;
@@ -500,10 +628,6 @@ export async function runPiRpcAttempt(
           const partial = extractText(e.message.content);
           if (partial) {
             assistantText = partial;
-            // Stream partial text to OpenClaw (if the harness params expose a streaming hook)
-            const onPartial = (params as unknown as { onPartialText?: (text: string) => void })
-              .onPartialText;
-            onPartial?.(partial);
           }
         }
         return;
@@ -512,6 +636,7 @@ export async function runPiRpcAttempt(
       if (type === "tool_execution_start") {
         const e = event as unknown as PiToolStartEvent;
         toolCallIds.set(e.toolCallId, e.toolName);
+        touchProgress(`tool_start:${e.toolName}`, { force: true });
         return;
       }
 
@@ -520,6 +645,17 @@ export async function runPiRpcAttempt(
         const toolName = e.toolName || toolCallIds.get(e.toolCallId) || "unknown";
         toolMetas.push({ toolName, meta: e.isError ? "error" : undefined });
         toolCallIds.delete(e.toolCallId);
+        touchProgress(`tool_end:${toolName}`, { force: true });
+        return;
+      }
+
+      if (
+        type === "agent_start" ||
+        type === "turn_start" ||
+        type === "turn_end" ||
+        type === "tool_execution_update"
+      ) {
+        touchProgress(type);
         return;
       }
 
@@ -534,23 +670,95 @@ export async function runPiRpcAttempt(
 
       if (type === "response") {
         const e = event as unknown as PiRpcResponse;
-        if (e.command === "prompt" && !e.success) {
+        if (e.command === "prompt") {
+          if (e.success) {
+            touchProgress("prompt_accepted", { force: true });
+            return;
+          }
+          if (!healed && /already processing/iu.test(e.error ?? "")) {
+            healed = true;
+            void healBusyBindingAndResend();
+            return;
+          }
           promptErrored = true;
           promptErrorMsg = e.error ?? "pi RPC prompt failed";
           finish({ promptError: new Error(promptErrorMsg) });
         }
         return;
       }
+
+      unknownEventCount += 1;
+      if (unknownEventCount <= UNKNOWN_EVENT_LOG_LIMIT) {
+        embeddedAgentLog.debug("pi-fork rpc event ignored (no handler)", {
+          sessionId,
+          eventType: type,
+          unknownEventCount,
+        });
+      }
     };
 
-    piProcess.listeners.add(onEvent);
+    // Mid-turn steering parity: register a queue handle so OpenClaw's default
+    // messages.queue.mode="steer" injects burst messages (e.g. several forwarded
+    // WhatsApp messages) into the active pi turn instead of stalling behind it.
+    const queueHandle = {
+      kind: "embedded" as const,
+      queueMessage: async (text: string) => {
+        if (done) {
+          throw new Error("pi-fork turn already finished");
+        }
+        await sendPiRpcCommand({
+          piProcess,
+          command: { type: "steer", message: text },
+          timeoutMs: STEER_ACK_TIMEOUT_MS,
+        });
+        if (done) {
+          // The turn ended while the steer was in flight; pi may never run it.
+          // Throwing routes the message back to the followup queue.
+          throw new Error("pi-fork turn finished before steer delivery");
+        }
+        touchProgress("steer_queued", { force: true });
+      },
+      isStreaming: () => !done,
+      isCompacting: () => false,
+      sourceReplyDeliveryMode: shaped.sourceReplyDeliveryMode,
+      cancel: () => {
+        onAbort();
+      },
+      abort: () => {
+        onAbort();
+      },
+    };
 
-    // Handle external abort signal
-    const abortSignal = (params as unknown as { abortSignal?: AbortSignal }).abortSignal;
-    if (abortSignal?.aborted) {
-      finish({ aborted: true, externalAbort: true });
-      return;
-    }
+    // After an external abort we let OpenClaw move on immediately, but pi may
+    // still be mid tool-call. Watch for it to settle; replace the process if it
+    // does not, so the next turn never inherits a wedged binding.
+    const installAbortSettleWatch = () => {
+      const ownedProcess = piProcess;
+      const settleListener = (event: Record<string, unknown>) => {
+        const type = event.type as string | undefined;
+        const isAbortAck =
+          type === "response" && (event as { command?: string }).command === "abort";
+        if (type === "agent_end" || isAbortAck) {
+          ownedProcess.listeners.delete(settleListener);
+          clearTimeout(settleTimer);
+          ownedProcess.turnActive = false;
+        }
+      };
+      ownedProcess.listeners.add(settleListener);
+      const settleTimer = setTimeout(() => {
+        ownedProcess.listeners.delete(settleListener);
+        if (ownedProcess.turnActive) {
+          embeddedAgentLog.warn("pi-fork abort settle timed out; replacing pi process", {
+            sessionId,
+            sessionKey,
+          });
+          clearPiProcess(sessionId);
+          ownedProcess.turnActive = false;
+        }
+      }, ABORT_SETTLE_MS);
+      settleTimer.unref?.();
+    };
+
     const onAbort = () => {
       if (done) {
         return;
@@ -558,17 +766,32 @@ export async function runPiRpcAttempt(
       try {
         piProcess.send({ type: "abort" });
       } catch {}
-      finish({ aborted: true, externalAbort: true });
+      installAbortSettleWatch();
+      finish({ aborted: true, externalAbort: true, deferTurnRelease: true });
     };
-    abortSignal?.addEventListener("abort", onAbort, { once: true });
 
     // Handle pi process dying mid-turn
     closeHandler = () => {
       if (!done) {
-        finish({ promptError: new Error("Pi process exited unexpectedly during turn") });
+        finish({
+          promptError: new Error(
+            `Pi process exited unexpectedly during turn${formatPiStderrTail(piProcess)}`,
+          ),
+        });
       }
     };
-    piProcess.onClose.add(closeHandler);
+
+    attachTurn();
+    setActiveEmbeddedRun(sessionId, queueHandle, sessionKey, shaped.sessionFile);
+    piProcess.turnActive = true;
+
+    // Handle external abort signal
+    const abortSignal = shaped.abortSignal;
+    if (abortSignal?.aborted) {
+      onAbort();
+      return;
+    }
+    abortSignal?.addEventListener("abort", onAbort, { once: true });
 
     // Turn timeout
     timeoutHandle = setTimeout(() => {
@@ -577,11 +800,13 @@ export async function runPiRpcAttempt(
           piProcess.send({ type: "abort" });
         } catch {}
         clearPiProcess(sessionId);
+        piProcess.turnActive = false;
         finish({ timedOut: true });
       }
     }, turnTimeoutMs);
 
     // Send the prompt
+    touchProgress("prompt_sent", { force: true });
     piProcess.send(promptCommand);
   });
 }
