@@ -46,7 +46,40 @@
       "myPiHarnessPackagePath": { "type": "string" },
       "authProfilesPath": { "type": "string" },
       "piAuthPath": { "type": "string" },
-      "piAgentDir": { "type": "string" }
+      "piAgentDir": { "type": "string" },
+      "nativeToolExclude": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": ["Agent"]
+      },
+      "adaptorTools": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "server", "tool"],
+          "properties": {
+            "name": { "type": "string" },
+            "server": { "type": "string" },
+            "tool": { "type": "string" },
+            "description": { "type": "string" },
+            "label": { "type": "string" },
+            "inputSchema": { "type": "object" }
+          }
+        }
+      },
+      "adaptorExec": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "command": { "type": "string" },
+          "args": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "adaptorTimeoutMs": {
+        "type": "number",
+        "minimum": 1
+      }
     }
   }
 }
