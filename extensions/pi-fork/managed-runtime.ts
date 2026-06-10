@@ -237,7 +237,7 @@ export function ensurePiHarnessAgentSettings(config: PiHarnessConfig): string {
       {
         defaultProvider: "claude-bridge",
         defaultModel: "claude-opus-4-8",
-        defaultThinkingLevel: "off",
+        defaultThinkingLevel: config.defaultThinkingLevel ?? "off",
         enabledModels: ["claude-bridge/*", "openai-codex/*", "openai/*"],
         packages: [packagePath],
         extensions: buildPiHarnessExtensionSettings(config),

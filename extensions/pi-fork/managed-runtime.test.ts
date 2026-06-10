@@ -80,4 +80,21 @@ describe("ensurePiHarnessAgentSettings", () => {
       },
     });
   });
+
+  it("honors a configured defaultThinkingLevel (ISSUE-140: adaptive-only models reject thinking disabled)", () => {
+    const piAgentDir = mkdtempSync(join(tmpdir(), "openclaw-pi-agent-"));
+    const packageDir = mkdtempSync(join(tmpdir(), "my-pi-harness-"));
+    tempDirs.push(piAgentDir, packageDir);
+    mkdirSync(join(packageDir, "src"), { recursive: true });
+
+    const settingsPath = ensurePiHarnessAgentSettings({
+      piAgentDir,
+      myPiHarnessPackagePath: packageDir,
+      defaultThinkingLevel: "adaptive",
+    });
+
+    expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toMatchObject({
+      defaultThinkingLevel: "adaptive",
+    });
+  });
 });

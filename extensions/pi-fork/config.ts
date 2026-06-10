@@ -19,6 +19,14 @@ export interface PiHarnessConfig {
    * pi-fork traffic through a different pi-side provider.
    */
   downstreamProvider?: string;
+  /**
+   * Default thinking level written to the spawned pi agent's settings.json.
+   * Models that only support adaptive thinking (e.g. claude-fable-5) reject
+   * `thinking: {type: "disabled"}` — pi sends that when the level is "off" —
+   * so set `"adaptive"` when routing such models through pi-fork (ISSUE-140).
+   * Default: `"off"` (previous hardcoded behavior).
+   */
+  defaultThinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "adaptive";
   /** Maximum ms to wait for a turn. Default: 300000 (5 min). */
   turnTimeoutMs?: number;
   /** Prompt payload strategy. Defaults to full OpenClaw prompt passthrough. */
