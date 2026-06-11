@@ -759,6 +759,7 @@ export function createSessionsSendTool(opts?: {
           error: result.error,
           sentBeforeError: true,
           sessionKey: displayKey,
+          delivery,
         });
       }
       if (result.status === "error") {
@@ -768,6 +769,7 @@ export function createSessionsSendTool(opts?: {
           error: result.error ?? "agent error",
           sentBeforeError: true,
           sessionKey: displayKey,
+          delivery,
         });
       }
       const reply = result.replyText;
