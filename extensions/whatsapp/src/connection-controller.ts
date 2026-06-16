@@ -59,6 +59,10 @@ type WhatsAppLiveConnection = {
   heartbeat: TimerHandle | null;
   watchdogTimer: TimerHandle | null;
   lastInboundAt: number | null;
+  /** Timestamp of the last successful app-layer ack (e.g. presence-ping IQ).
+   * Separate from lastInboundAt so the minutesSinceLastMessage metric is unaffected.
+   * The watchdog uses max(lastInboundAt, lastAppActivityAt) as its app-silence baseline. */
+  lastAppActivityAt: number | null;
   lastTransportActivityAt: number;
   handledMessages: number;
   unregisterUnhandled: (() => void) | null;
@@ -156,6 +160,7 @@ function createLiveConnection(params: {
     heartbeat: null,
     watchdogTimer: null,
     lastInboundAt: null,
+    lastAppActivityAt: null,
     lastTransportActivityAt: Date.now(),
     handledMessages: 0,
     unregisterUnhandled: null,
@@ -374,7 +379,10 @@ export class WhatsAppConnectionController {
   private readonly abortSignal?: AbortSignal;
   private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   private readonly isNonRetryableStatus: (statusCode: unknown) => boolean;
-  private readonly socketTiming: Required<WhatsAppSocketTimingOptions>;
+  private readonly socketTiming: Required<
+    Omit<WhatsAppSocketTimingOptions, "onPresencePingSuccess">
+  >;
+  private readonly onPresencePingSuccess?: () => void;
   private readonly abortPromise?: Promise<"aborted">;
   private readonly disconnectRetryController = new AbortController();
 
@@ -396,6 +404,7 @@ export class WhatsAppConnectionController {
     sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
     isNonRetryableStatus?: (statusCode: unknown) => boolean;
     socketTiming?: WhatsAppSocketTimingOptions;
+    onPresencePingSuccess?: () => void;
   }) {
     this.accountId = params.accountId;
     this.authDir = params.authDir;
@@ -420,6 +429,7 @@ export class WhatsAppConnectionController {
       ...DEFAULT_WHATSAPP_SOCKET_TIMING,
       ...params.socketTiming,
     };
+    this.onPresencePingSuccess = params.onPresencePingSuccess;
     this.socketRef = { current: null };
     this.abortPromise =
       params.abortSignal &&
@@ -500,6 +510,21 @@ export class WhatsAppConnectionController {
     this.current.lastTransportActivityAt = timestamp;
   }
 
+  /**
+   * Record a successful app-layer ack (e.g. a presence-ping IQ response).
+   * Advances the watchdog's app-silence baseline WITHOUT touching handledMessages
+   * or lastInboundAt — so minutesSinceLastMessage metrics stay accurate.
+   * ISSUE-142: prevents idle-but-healthy channels from being restarted every
+   * messageTimeoutMs when presence pings succeed but no real inbounds arrive.
+   */
+  noteAppLayerActivity(timestamp = Date.now()): void {
+    if (!this.current) {
+      return;
+    }
+    this.current.lastAppActivityAt = timestamp;
+    this.current.lastTransportActivityAt = timestamp;
+  }
+
   getCurrentSnapshot(
     connection: WhatsAppLiveConnection | null = this.current,
   ): WhatsAppConnectionSnapshot | null {
@@ -549,6 +574,7 @@ export class WhatsAppConnectionController {
         ...this.socketTiming,
         ...(params.getMessage ? { getMessage: params.getMessage } : {}),
         ...(params.cachedGroupMetadata ? { cachedGroupMetadata: params.cachedGroupMetadata } : {}),
+        onPresencePingSuccess: this.onPresencePingSuccess,
       });
       await waitForWaConnection(sock, { timeoutMs: this.socketTiming.connectTimeoutMs });
 
@@ -775,7 +801,12 @@ export class WhatsAppConnectionController {
     connection.watchdogTimer = setInterval(() => {
       const now = Date.now();
       const transportStaleForMs = now - connection.lastTransportActivityAt;
-      const appBaselineAt = connection.lastInboundAt ?? connection.startedAt;
+      // ISSUE-142: use max(lastInboundAt, lastAppActivityAt) as the app-silence baseline
+      // so a successful presence-ping ack resets the watchdog without conflating
+      // lastInboundAt (used by the minutesSinceLastMessage metric in onHeartbeat).
+      const lastAppActivityAt = connection.lastAppActivityAt ?? 0;
+      const lastInboundOrStartAt = connection.lastInboundAt ?? connection.startedAt;
+      const appBaselineAt = Math.max(lastInboundOrStartAt, lastAppActivityAt);
       const appSilentForMs = now - appBaselineAt;
       const appSilenceTimeoutMs = connection.openedAfterRecentInbound
         ? this.messageTimeoutMs

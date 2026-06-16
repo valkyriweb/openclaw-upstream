@@ -12,6 +12,9 @@ export type WhatsAppSocketTimingOptions = {
   keepAliveIntervalMs?: number;
   connectTimeoutMs?: number;
   defaultQueryTimeoutMs?: number;
+  /** Called after a successful presence-ping IQ ack. Internal callback — not
+   * persisted to config; passed via constructor/override only. ISSUE-142. */
+  onPresencePingSuccess?: () => void;
 };
 
 export type WhatsAppSocketOperationAdapter = {
@@ -27,7 +30,9 @@ type WhatsAppSocketOperationTimeoutHooks = {
   onSendMessageTimeout?: (params: { jid: string; promise: Promise<WAMessage | undefined> }) => void;
 };
 
-export const DEFAULT_WHATSAPP_SOCKET_TIMING: Required<WhatsAppSocketTimingOptions> = {
+export const DEFAULT_WHATSAPP_SOCKET_TIMING: Required<
+  Omit<WhatsAppSocketTimingOptions, "onPresencePingSuccess">
+> = {
   keepAliveIntervalMs: 25_000,
   connectTimeoutMs: 60_000,
   defaultQueryTimeoutMs: 60_000,
@@ -52,7 +57,8 @@ function positiveInteger(value: number | undefined): number | undefined {
 export function resolveWhatsAppSocketTiming(
   cfg: OpenClawConfig,
   overrides?: WhatsAppSocketTimingOptions,
-): Required<WhatsAppSocketTimingOptions> {
+): Required<Omit<WhatsAppSocketTimingOptions, "onPresencePingSuccess">> &
+  Pick<WhatsAppSocketTimingOptions, "onPresencePingSuccess"> {
   const configured = cfg.web?.whatsapp;
   return {
     keepAliveIntervalMs:
@@ -67,6 +73,8 @@ export function resolveWhatsAppSocketTiming(
       positiveInteger(overrides?.defaultQueryTimeoutMs) ??
       positiveInteger(configured?.defaultQueryTimeoutMs) ??
       DEFAULT_WHATSAPP_SOCKET_TIMING.defaultQueryTimeoutMs,
+    // Callback-only: never sourced from config file, passed through from overrides only.
+    onPresencePingSuccess: overrides?.onPresencePingSuccess,
   };
 }
 

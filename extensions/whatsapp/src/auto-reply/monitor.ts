@@ -222,6 +222,10 @@ export async function monitorWebChannel(
   const transportTimeoutMs = tuning.transportTimeoutMs ?? DEFAULT_TRANSPORT_TIMEOUT_MS;
   const messageTimeoutMs = tuning.messageTimeoutMs ?? 30 * 60 * 1000;
   const watchdogCheckMs = tuning.watchdogCheckMs ?? 60 * 1000;
+  // ISSUE-142: controllerRef breaks the circular init — onPresencePingSuccess
+  // is passed to the constructor but needs to call back into the controller.
+  // Set after construction below.
+  const controllerRef: { current: WhatsAppConnectionController | null } = { current: null };
   const controller = new WhatsAppConnectionController({
     accountId: account.accountId,
     authDir: account.authDir,
@@ -236,7 +240,9 @@ export async function monitorWebChannel(
     abortSignal,
     sleep,
     isNonRetryableStatus: isNonRetryableWebCloseStatus,
+    onPresencePingSuccess: () => controllerRef.current?.noteAppLayerActivity(),
   });
+  controllerRef.current = controller;
   const statusController = createWebChannelStatusController(tuning.statusSink);
   statusController.emit();
 

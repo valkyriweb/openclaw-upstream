@@ -236,9 +236,14 @@ export async function createWaSocket(
     }
   };
   const sendPresencePing = () => {
-    sock.sendPresenceUpdate("available").catch((err) => {
-      sessionLogger.warn({ error: String(err) }, "WhatsApp presence-ping failed");
-    });
+    sock
+      .sendPresenceUpdate("available")
+      .then(() => {
+        opts.onPresencePingSuccess?.();
+      })
+      .catch((err) => {
+        sessionLogger.warn({ error: String(err) }, "WhatsApp presence-ping failed");
+      });
   };
 
   sock.ev.on("creds.update", () => enqueueSaveCreds(authDir, saveCreds, sessionLogger));
