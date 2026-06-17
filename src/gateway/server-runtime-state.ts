@@ -35,6 +35,7 @@ import type { GatewayRequestContext } from "./server-methods/types.js";
 import type { DedupeEntry } from "./server-shared.js";
 import type { HookClientIpConfig, HooksRequestHandler } from "./server/hooks-request-handler.js";
 import { listenGatewayHttpServer } from "./server/http-listen.js";
+import { createGatewayMetricsCounters, type GatewayMetricsCounters } from "./server/metrics.js";
 import type { PluginRoutePathContext } from "./server/plugins-http/path-context.js";
 import { shouldEnforceGatewayAuthForPluginPath } from "./server/plugins-http/route-auth.js";
 import { findMatchingPluginNodeCapabilityRoute } from "./server/plugins-http/route-capability.js";
@@ -125,6 +126,7 @@ export async function createGatewayRuntimeState(params: {
   ) => ChatRunEntry | undefined;
   chatAbortControllers: Map<string, ChatAbortControllerEntry>;
   toolEventRecipients: ReturnType<typeof createToolEventRecipientRegistry>;
+  metricsCounters: GatewayMetricsCounters;
 }> {
   pinActivePluginHttpRouteRegistry(params.pluginRegistry);
   pinActivePluginSessionExtensionRegistry(params.pluginRegistry);
@@ -341,6 +343,7 @@ export async function createGatewayRuntimeState(params: {
     const removeChatRun = chatRunRegistry.remove;
     const chatAbortControllers = new Map<string, ChatAbortControllerEntry>();
     const toolEventRecipients = createToolEventRecipientRegistry();
+    const metricsCounters = createGatewayMetricsCounters();
 
     return {
       releasePluginRouteRegistry: () => {
@@ -373,6 +376,7 @@ export async function createGatewayRuntimeState(params: {
       removeChatRun,
       chatAbortControllers,
       toolEventRecipients,
+      metricsCounters,
     };
   } catch (err) {
     // If state creation fails after pins are installed, release them immediately so later
