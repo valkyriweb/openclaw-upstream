@@ -30,7 +30,10 @@ import {
 import { formatAuthDoctorHint } from "./doctor.js";
 import { readExternalCliBootstrapCredential } from "./external-cli-sync.js";
 import { createOAuthManager, OAuthManagerRefreshError } from "./oauth-manager.js";
-import { OAuthRefreshFailureError } from "./oauth-refresh-failure.js";
+import {
+  classifyOAuthRefreshFailureReason,
+  OAuthRefreshFailureError,
+} from "./oauth-refresh-failure.js";
 import { assertNoOAuthSecretRefPolicyViolations } from "./policy.js";
 import { clearLastGoodProfileWithLock } from "./profiles.js";
 import { suggestOAuthProfileIdForLegacyDefault } from "./repair.js";
@@ -169,13 +172,34 @@ function extractErrorMessage(error: unknown): string {
   return formatErrorMessage(error);
 }
 
+// OpenAI Codex (ChatGPT) signals a rotated / single-use refresh token with a
+// *bare* HTTP 401 — an empty `{}` body and no error marker — rather than the
+// explicit `refresh_token_reused` / `invalid_grant` marker other providers
+// return. In a multi-agent deployment that markerless 401 IS the
+// concurrent-rotation signal: a peer (or a separate refresh path on the same
+// shared credential lineage) consumed the single-use refresh token first.
+const OPENAI_CODEX_REFRESH_REJECTED_401 = "openai codex token refresh failed (401)";
+
 /** Detect provider errors caused by single-use OAuth refresh token races. */
 export function isRefreshTokenReusedError(error: unknown): boolean {
   const message = normalizeLowercaseStringOrEmpty(extractErrorMessage(error));
-  return (
+  if (
     message.includes("refresh_token_reused") ||
     message.includes("refresh token has already been used") ||
     message.includes("already been used to generate a new access token")
+  ) {
+    return true;
+  }
+  // Treat a Codex refresh 401 as a rotation/reuse signal — driving the
+  // cross-agent reload-and-retry recovery (oauth-manager.ts, issue #26322) —
+  // ONLY when it carries no explicit re-auth reason. A 401 that classifies as
+  // sign-in-required / invalid / revoked / invalid_grant is genuine re-auth,
+  // not a race, and must not be reclassified as reuse (it would change auth
+  // fallback / lastGood handling). The recovery's own `hasOAuthCredentialChanged`
+  // guard separately keeps a genuinely revoked token from being falsely adopted.
+  return (
+    message.includes(OPENAI_CODEX_REFRESH_REJECTED_401) &&
+    classifyOAuthRefreshFailureReason(message) === null
   );
 }
 
