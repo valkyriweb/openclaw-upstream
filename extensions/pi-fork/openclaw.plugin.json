@@ -23,6 +23,12 @@
         "minimum": 1,
         "default": 300000
       },
+      "downstreamProvider": { "type": "string" },
+      "downstreamProvidersByModel": {
+        "type": "object",
+        "additionalProperties": { "type": "string" },
+        "default": {}
+      },
       "promptContextMode": {
         "type": "string",
         "enum": ["full", "lean-automation"],
@@ -37,6 +43,11 @@
         "minimum": 1
       },
       "piMonoForkSource": { "type": "string" },
+      "defaultThinkingLevel": {
+        "type": "string",
+        "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "adaptive"],
+        "default": "off"
+      },
       "piMonoForkRef": { "type": "string" },
       "piMonoForkRuntimeDir": { "type": "string" },
       "piMonoForkAutoInstall": {
@@ -51,6 +62,11 @@
         "type": "array",
         "items": { "type": "string" },
         "default": ["Agent"]
+      },
+      "nativeToolEager": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": ["TaskBackgroundList", "TaskStop"]
       },
       "adaptorTools": {
         "type": "array",

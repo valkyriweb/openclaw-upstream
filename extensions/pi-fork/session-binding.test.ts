@@ -7,6 +7,7 @@ import {
   clearPiProcess,
   dispatchPiRpcJsonlChunk,
   getOrCreatePiProcess,
+  resolvePiRpcProvider,
 } from "./session-binding.js";
 
 describe("dispatchPiRpcJsonlChunk", () => {
@@ -106,15 +107,46 @@ describe("buildPiRpcArgv", () => {
     ]);
   });
 
-  it("honors config.downstreamProvider when rewriting pi-fork traffic", () => {
+  it("routes known Codex models through openai-codex while staying inside pi-fork", () => {
     expect(
       buildPiRpcArgv({
         prefixArgs: [],
-        config: { downstreamProvider: "openai-codex" },
+        config: {},
         provider: "pi-fork",
         modelId: "gpt-5.5",
       }),
     ).toEqual(["--provider", "openai-codex", "--model", "gpt-5.5", "--mode", "rpc"]);
+  });
+
+  it("honors config.downstreamProvidersByModel before the built-in Codex routing map", () => {
+    expect(
+      buildPiRpcArgv({
+        prefixArgs: [],
+        config: { downstreamProvidersByModel: { "gpt-5.5": "openai" } },
+        provider: "pi-fork",
+        modelId: "gpt-5.5",
+      }),
+    ).toEqual(["--provider", "openai", "--model", "gpt-5.5", "--mode", "rpc"]);
+  });
+
+  it("uses config.downstreamProvider as the default for non-mapped pi-fork models", () => {
+    expect(
+      buildPiRpcArgv({
+        prefixArgs: [],
+        config: { downstreamProvider: "custom-bridge" },
+        provider: "pi-fork",
+        modelId: "claude-custom",
+      }),
+    ).toEqual(["--provider", "custom-bridge", "--model", "claude-custom", "--mode", "rpc"]);
+  });
+
+  it("exposes the resolved provider used for pi process binding", () => {
+    expect(resolvePiRpcProvider({ config: {}, provider: "pi-fork", modelId: "gpt-5.5" })).toBe(
+      "openai-codex",
+    );
+    expect(
+      resolvePiRpcProvider({ config: {}, provider: "pi-fork", modelId: "claude-opus-4-8" }),
+    ).toBe("claude-bridge");
   });
 
   it("passes non-pi-fork provider and model to the pi RPC process", () => {
@@ -163,6 +195,39 @@ describe("buildPiRpcArgv", () => {
     expect(changed).not.toBe(first);
     expect(changed.requestedWorkspaceDir).toBe(workspaceB);
     clearPiProcess("workspace-switch-test");
+  });
+
+  it("replaces a session process when the resolved downstream provider changes", async () => {
+    const packageDir = mkdtempSync(join(tmpdir(), "my-pi-harness-"));
+    const scriptPath = join(packageDir, "pi-rpc.mjs");
+    writeFileSync(scriptPath, "process.stdin.resume(); setInterval(() => {}, 1000);\n");
+    const baseConfig = {
+      command: process.execPath,
+      args: [scriptPath],
+      myPiHarnessPackagePath: packageDir,
+    };
+
+    const first = await getOrCreatePiProcess("downstream-provider-switch-test", {
+      config: baseConfig,
+      provider: "pi-fork",
+      modelId: "gpt-5.5",
+    });
+    const same = await getOrCreatePiProcess("downstream-provider-switch-test", {
+      config: baseConfig,
+      provider: "pi-fork",
+      modelId: "gpt-5.5",
+    });
+    const changed = await getOrCreatePiProcess("downstream-provider-switch-test", {
+      config: { ...baseConfig, downstreamProvidersByModel: { "gpt-5.5": "openai" } },
+      provider: "pi-fork",
+      modelId: "gpt-5.5",
+    });
+
+    expect(same).toBe(first);
+    expect(changed).not.toBe(first);
+    expect(first.requestedProvider).toBe("openai-codex");
+    expect(changed.requestedProvider).toBe("openai");
+    clearPiProcess("downstream-provider-switch-test");
   });
 
   it("replaces a session process when the requested model changes", async () => {

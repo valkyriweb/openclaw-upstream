@@ -43,15 +43,16 @@ const CODEX_OAUTH_MODELS = [
   { id: "gpt-5.3-codex", name: "GPT-5.3 Codex (ChatGPT)" },
   { id: "gpt-5.2-codex", name: "GPT-5.2 Codex (ChatGPT)" },
   { id: "gpt-5.2", name: "GPT-5.2 (ChatGPT)" },
-].map((m) => ({
-  ...m,
-  contextWindow: 272000,
-  maxTokens: 128000,
-  reasoning: true,
-  thinkingLevelMap: { xhigh: "xhigh", minimal: "low" },
-  input: ["text", "image"],
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-}));
+].map((m) =>
+  Object.assign(m, {
+    contextWindow: 272000,
+    maxTokens: 128000,
+    reasoning: true,
+    thinkingLevelMap: { xhigh: "xhigh", minimal: "low" },
+    input: ["text", "image"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  }),
+);
 const DEFAULT_PI_HARNESS_MODELS = {
   providers: {
     "claude-bridge": {
@@ -147,7 +148,7 @@ function syncOpenAiCodexAuth(config: PiHarnessConfig): void {
         entry.access &&
         entry.refresh,
     )
-    .sort((a, b) => (b.expires ?? 0) - (a.expires ?? 0))[0];
+    .toSorted((a, b) => (b.expires ?? 0) - (a.expires ?? 0))[0];
   if (!profile) {
     return;
   }
@@ -175,8 +176,12 @@ function syncOpenAiCodexAuth(config: PiHarnessConfig): void {
  */
 function buildPiHarnessExtensionSettings(config: PiHarnessConfig): Record<string, unknown> {
   const exclude = config.nativeToolExclude ?? ["Agent"];
+  const eager = config.nativeToolEager ?? ["TaskBackgroundList", "TaskStop"];
   const settings: Record<string, unknown> = {
-    "native-tool-overrides": { exclude },
+    "native-tool-overrides": {
+      exclude,
+      ...(eager.length > 0 ? { eager } : {}),
+    },
   };
 
   const tools = Array.isArray(config.adaptorTools)

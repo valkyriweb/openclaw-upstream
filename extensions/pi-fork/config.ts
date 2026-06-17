@@ -20,6 +20,13 @@ export interface PiHarnessConfig {
    */
   downstreamProvider?: string;
   /**
+   * Model-specific concrete pi-side provider overrides for synthetic
+   * `pi-fork/<model>` requests. This keeps `pi-fork/claude-*` on
+   * `claude-bridge` while allowing `pi-fork/gpt-5.5` to stay inside the
+   * pi-fork harness and route to `openai-codex` under the hood.
+   */
+  downstreamProvidersByModel?: Record<string, string>;
+  /**
    * Default thinking level written to the spawned pi agent's settings.json.
    * Models that only support adaptive thinking (e.g. claude-fable-5) reject
    * `thinking: {type: "disabled"}` — pi sends that when the level is "off" —
@@ -58,6 +65,13 @@ export interface PiHarnessConfig {
    * ~140k tokens/session and are not used by OpenClaw-driven turns.
    */
   nativeToolExclude?: string[];
+  /**
+   * Normally-deferred native pi tools that this pi-fork profile should expose as
+   * full provider-visible schemas. Defaults to TaskBackgroundList/TaskStop so
+   * Anthropic never sees a tool_reference for a task utility that is absent from
+   * the final tools[] list.
+   */
+  nativeToolEager?: string[];
   /**
    * Static catalog of OpenClaw tools to surface inside the spawned pi as
    * provider-native deferred proxy tools (progressive disclosure via

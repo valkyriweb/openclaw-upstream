@@ -16,6 +16,15 @@ const STDERR_TAIL_MAX_LINES = 50;
 const STDERR_TAIL_MAX_LINE_CHARS = 500;
 const PARSE_ERROR_LOG_LIMIT = 5;
 const KILL_ESCALATION_MS = 3_000;
+const DEFAULT_DOWNSTREAM_PROVIDER = "claude-bridge";
+const DEFAULT_CODEX_DOWNSTREAM_MODELS = new Set([
+  "gpt-5.5",
+  "gpt-5.4",
+  "gpt-5.4-mini",
+  "gpt-5.3-codex",
+  "gpt-5.2-codex",
+  "gpt-5.2",
+]);
 
 function resolvePiAgentEnv(config: PiHarnessConfig): NodeJS.ProcessEnv {
   ensurePiHarnessAgentSettings(config);
@@ -26,6 +35,26 @@ function resolvePiAgentEnv(config: PiHarnessConfig): NodeJS.ProcessEnv {
 }
 
 export type PiRpcSendFn = (obj: unknown) => void;
+
+export function resolvePiRpcProvider(opts: {
+  config: PiHarnessConfig;
+  provider?: string;
+  modelId?: string;
+}): string | undefined {
+  if (opts.provider !== "pi-fork") {
+    return opts.provider;
+  }
+  const configured = opts.modelId
+    ? opts.config.downstreamProvidersByModel?.[opts.modelId]
+    : undefined;
+  if (configured?.trim()) {
+    return configured.trim();
+  }
+  if (opts.modelId && DEFAULT_CODEX_DOWNSTREAM_MODELS.has(opts.modelId)) {
+    return "openai-codex";
+  }
+  return opts.config.downstreamProvider ?? DEFAULT_DOWNSTREAM_PROVIDER;
+}
 
 export type PiRpcProcess = {
   proc: ChildProcess;
@@ -66,12 +95,22 @@ export function buildPiRpcArgv(opts: {
   const modelArgs: string[] = [];
   // `pi-fork` is OpenClaw's synthetic provider marker — pi itself has no such
   // provider in its models.json. Rewrite to a concrete pi-side provider so pi
-  // can resolve the model and reach the configured backend (default: the
-  // claude-bridge sidecar). Without this rewrite pi falls through to its
-  // built-in anthropic catalog and dies on `No API key found for anthropic`.
-  const downstreamProvider = opts.config.downstreamProvider ?? "claude-bridge";
+  // can resolve the model and reach the configured backend. Claude models stay
+  // on the claude-bridge sidecar; known ChatGPT/Codex model ids route through
+  // openai-codex so `pi-fork/gpt-5.5` keeps the pi harness semantics instead of
+  // falling out to the native OpenClaw Codex harness.
+  const downstreamProvider = resolvePiRpcProvider({
+    config: opts.config,
+    provider: opts.provider,
+    modelId: opts.modelId,
+  });
   if (opts.modelId && opts.provider === "pi-fork") {
-    modelArgs.push("--provider", downstreamProvider, "--model", opts.modelId);
+    modelArgs.push(
+      "--provider",
+      downstreamProvider ?? DEFAULT_DOWNSTREAM_PROVIDER,
+      "--model",
+      opts.modelId,
+    );
   } else if (opts.modelId && opts.provider) {
     modelArgs.push("--provider", opts.provider, "--model", opts.modelId);
   } else if (opts.modelId) {
@@ -212,10 +251,15 @@ export async function getOrCreatePiProcess(
 ): Promise<PiRpcProcess> {
   const existing = bindings.get(openclaSessionId);
   const requestedWorkspaceDir = opts.workspaceDir ?? process.cwd();
+  const requestedProvider = resolvePiRpcProvider({
+    config: opts.config,
+    provider: opts.provider,
+    modelId: opts.modelId,
+  });
   if (existing && existing.proc.exitCode === null && !existing.proc.killed) {
     if (
       existing.requestedModelId === opts.modelId &&
-      existing.requestedProvider === opts.provider &&
+      existing.requestedProvider === requestedProvider &&
       existing.requestedWorkspaceDir === requestedWorkspaceDir
     ) {
       return existing;
@@ -309,7 +353,7 @@ export async function getOrCreatePiProcess(
     send,
     sessionId: openclaSessionId,
     requestedModelId: opts.modelId,
-    requestedProvider: opts.provider,
+    requestedProvider,
     requestedWorkspaceDir,
     listeners,
     onClose,

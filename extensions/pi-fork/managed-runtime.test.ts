@@ -59,7 +59,10 @@ describe("ensurePiHarnessAgentSettings", () => {
       enabledModels: ["claude-bridge/*", "openai-codex/*", "openai/*"],
       packages: [packageDir],
       extensions: {
-        "native-tool-overrides": { exclude: ["Agent"] },
+        "native-tool-overrides": {
+          exclude: ["Agent"],
+          eager: ["TaskBackgroundList", "TaskStop"],
+        },
       },
     });
     const modelsPath = join(piAgentDir, "models.json");
@@ -81,6 +84,28 @@ describe("ensurePiHarnessAgentSettings", () => {
     });
   });
 
+  it("honors configured native-tool eager overrides for profile-specific tool visibility", () => {
+    const piAgentDir = mkdtempSync(join(tmpdir(), "openclaw-pi-agent-"));
+    const packageDir = mkdtempSync(join(tmpdir(), "my-pi-harness-"));
+    tempDirs.push(piAgentDir, packageDir);
+    mkdirSync(join(packageDir, "src"), { recursive: true });
+
+    const settingsPath = ensurePiHarnessAgentSettings({
+      piAgentDir,
+      myPiHarnessPackagePath: packageDir,
+      nativeToolEager: [],
+    });
+
+    expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toMatchObject({
+      extensions: {
+        "native-tool-overrides": { exclude: ["Agent"] },
+      },
+    });
+    expect(
+      JSON.parse(readFileSync(settingsPath, "utf8")).extensions["native-tool-overrides"].eager,
+    ).toBeUndefined();
+  });
+
   it("honors a configured defaultThinkingLevel (ISSUE-140: adaptive-only models reject thinking disabled)", () => {
     const piAgentDir = mkdtempSync(join(tmpdir(), "openclaw-pi-agent-"));
     const packageDir = mkdtempSync(join(tmpdir(), "my-pi-harness-"));
@@ -95,6 +120,30 @@ describe("ensurePiHarnessAgentSettings", () => {
 
     expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toMatchObject({
       defaultThinkingLevel: "adaptive",
+    });
+  });
+});
+
+describe("plugin manifest config schema", () => {
+  // 2026-06-10 ISSUE-140: configSchema has additionalProperties:false — any
+  // PiHarnessConfig key missing from the manifest crashes the gateway at boot
+  // ("must not have additional properties"). Keep schema and config.ts in sync.
+  it("declares pi-fork config keys that affect managed spawn behavior", () => {
+    const manifest = JSON.parse(readFileSync(join(__dirname, "openclaw.plugin.json"), "utf8"));
+    expect(manifest.configSchema.properties.defaultThinkingLevel).toEqual({
+      type: "string",
+      enum: ["off", "minimal", "low", "medium", "high", "xhigh", "adaptive"],
+      default: "off",
+    });
+    expect(manifest.configSchema.properties.downstreamProvidersByModel).toEqual({
+      type: "object",
+      additionalProperties: { type: "string" },
+      default: {},
+    });
+    expect(manifest.configSchema.properties.nativeToolEager).toEqual({
+      type: "array",
+      items: { type: "string" },
+      default: ["TaskBackgroundList", "TaskStop"],
     });
   });
 });
