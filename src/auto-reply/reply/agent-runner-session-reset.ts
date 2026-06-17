@@ -15,6 +15,15 @@ type ResetSessionOptions = {
   cleanupTranscripts?: boolean;
 };
 
+function isDirectSessionKey(sessionKey: string | undefined): boolean {
+  const normalized = sessionKey?.toLowerCase();
+  return Boolean(
+    normalized?.includes(":direct:") ||
+    normalized?.includes(":dm:") ||
+    normalized?.includes(":private:"),
+  );
+}
+
 const deps = {
   generateSecureUuid,
   persistSessionResetLifecycle,
@@ -63,6 +72,10 @@ export async function resetReplyRunSession(params: {
     usageFamilySessionIds: Array.from(
       new Set([...(prevEntry.usageFamilySessionIds ?? []), prevEntry.sessionId, nextSessionId]),
     ),
+    resumedFromSessionId: prevEntry.sessionId,
+    resumedFromSessionFile: prevEntry.sessionFile,
+    resumedFromSessionReason: params.options.failureLabel,
+    resumedAt: now,
     lastInteractionAt: now,
     systemSent: false,
     abortedLastRun: false,
@@ -105,6 +118,15 @@ export async function resetReplyRunSession(params: {
     deps.error(
       `Failed to persist session reset after ${params.options.failureLabel} (${params.sessionKey}): ${String(err)}`,
     );
+  }
+  // Silent rotations (compaction/role-ordering) fire without user intent, so
+  // preserve recent user/assistant turns for direct-chat continuity.
+  if (isDirectSessionKey(params.sessionKey)) {
+    await replayRecentUserAssistantMessages({
+      sourceTranscript: prevEntry.sessionFile,
+      targetTranscript: nextSessionFile,
+      newSessionId: nextSessionId,
+    });
   }
   params.followupRun.run.sessionId = nextSessionId;
   params.followupRun.run.sessionFile = nextSessionFile;

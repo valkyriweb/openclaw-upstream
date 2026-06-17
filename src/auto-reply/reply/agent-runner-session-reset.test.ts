@@ -111,6 +111,10 @@ describe("resetReplyRunSession", () => {
     expect(reset).toBe(true);
     expect(isNewSession).toBe(true);
     expect(activeSessionEntry?.sessionId).toBe("00000000-0000-0000-0000-000000000123");
+    expect(activeSessionEntry?.resumedFromSessionId).toBe("session");
+    expect(activeSessionEntry?.resumedFromSessionFile).toBe(sessionEntry.sessionFile);
+    expect(activeSessionEntry?.resumedFromSessionReason).toBe("compaction failure");
+    expect(typeof activeSessionEntry?.resumedAt).toBe("number");
     expect(followupRun.run.sessionId).toBe(activeSessionEntry?.sessionId);
     expect(activeSessionEntry?.modelProvider).toBeUndefined();
     expect(activeSessionEntry?.model).toBeUndefined();
@@ -132,6 +136,7 @@ describe("resetReplyRunSession", () => {
       main: SessionEntry;
     };
     expect(persisted.main.sessionId).toBe(activeSessionEntry?.sessionId);
+    expect(persisted.main.resumedFromSessionId).toBe("session");
     expect(persisted.main.contextBudgetStatus).toBeUndefined();
     expect(persisted.main.fallbackNoticeReason).toBeUndefined();
   });

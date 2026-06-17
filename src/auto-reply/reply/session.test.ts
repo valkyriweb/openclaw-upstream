@@ -2577,6 +2577,168 @@ describe("initSessionState reset policy", () => {
     expect(result.sessionId).not.toBe(existingSessionId);
   });
 
+  it("continues recent transcript context when an automatic daily reset rotates the session", async () => {
+    vi.setSystemTime(new Date(2026, 0, 18, 5, 30, 0));
+    const root = await makeCaseDir("openclaw-reset-continuity-");
+    const storePath = path.join(root, "sessions.json");
+    const previousSessionFile = path.join(root, "previous.jsonl");
+    const sessionKey = "agent:main:whatsapp:dm:continuity";
+    const existingSessionId = "continuity-old-session";
+
+    const line = (record: unknown) => `${JSON.stringify(record)}\n`;
+    const message = (id: string, role: "user" | "assistant", content: string, parentId?: string) =>
+      line({
+        type: "message",
+        id,
+        parentId: parentId ?? null,
+        timestamp: "2026-01-18T04:45:00.000Z",
+        message: { role, content },
+      });
+    await fs.writeFile(
+      previousSessionFile,
+      [
+        line({ type: "session", id: existingSessionId }),
+        message("u1", "user", "older question"),
+        message("a1", "assistant", "older answer", "u1"),
+        message("u2", "user", "recent question", "a1"),
+        message("a2", "assistant", "recent answer", "u2"),
+      ].join(""),
+      "utf-8",
+    );
+
+    await writeSessionStoreFast(storePath, {
+      [sessionKey]: {
+        sessionId: existingSessionId,
+        sessionFile: previousSessionFile,
+        updatedAt: new Date(2026, 0, 18, 4, 30, 0).getTime(),
+      },
+    });
+
+    const cfg = {
+      session: {
+        store: storePath,
+        reset: { mode: "daily", atHour: 5, idleMinutes: 10 },
+      },
+    } as OpenClawConfig;
+    const result = await initSessionState({
+      ctx: { Body: "continue", SessionKey: sessionKey },
+      cfg,
+      commandAuthorized: true,
+    });
+
+    expect(result.isNewSession).toBe(true);
+    expect(result.resetTriggered).toBe(false);
+    expect(result.sessionId).not.toBe(existingSessionId);
+    expect(result.sessionEntry.resumedFromSessionId).toBe(existingSessionId);
+    expect(result.sessionEntry.resumedFromSessionFile).toBe(previousSessionFile);
+    expect(result.sessionEntry.resumedFromSessionReason).toBe("idle");
+    expect(result.sessionEntry.resumedAt).toBe(new Date(2026, 0, 18, 5, 30, 0).getTime());
+
+    const nextSessionFile = requireString(result.sessionEntry.sessionFile, "next session file");
+    const replayed = await fs.readFile(nextSessionFile, "utf-8");
+    expect(replayed).toContain("older question");
+    expect(replayed).toContain("older answer");
+    expect(replayed).toContain("recent question");
+    expect(replayed).toContain("recent answer");
+
+    const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
+    expect(stored[sessionKey].resumedFromSessionId).toBe(existingSessionId);
+  });
+
+  it("does not replay prior transcript text for automatic group-session rollover", async () => {
+    vi.setSystemTime(new Date(2026, 0, 18, 5, 30, 0));
+    const root = await makeCaseDir("openclaw-reset-group-no-replay-");
+    const storePath = path.join(root, "sessions.json");
+    const previousSessionFile = path.join(root, "previous.jsonl");
+    const sessionKey = "agent:main:whatsapp:group:g-continuity";
+    const existingSessionId = "group-old-session";
+    const sensitiveGroupText = "group text that must not be replayed";
+
+    await fs.writeFile(
+      previousSessionFile,
+      `${JSON.stringify({ type: "session", id: existingSessionId })}\n${JSON.stringify({
+        type: "message",
+        id: "group-u1",
+        timestamp: "2026-01-18T04:45:00.000Z",
+        message: { role: "user", content: sensitiveGroupText },
+      })}\n`,
+      "utf-8",
+    );
+
+    await writeSessionStoreFast(storePath, {
+      [sessionKey]: {
+        sessionId: existingSessionId,
+        sessionFile: previousSessionFile,
+        updatedAt: new Date(2026, 0, 18, 4, 30, 0).getTime(),
+      },
+    });
+
+    const result = await initSessionState({
+      ctx: { Body: "continue", ChatType: "group", SessionKey: sessionKey },
+      cfg: {
+        session: {
+          store: storePath,
+          reset: { mode: "daily", atHour: 5, idleMinutes: 10 },
+        },
+      } as OpenClawConfig,
+      commandAuthorized: true,
+    });
+
+    expect(result.isNewSession).toBe(true);
+    expect(result.sessionEntry.resumedFromSessionId).toBe(existingSessionId);
+    const nextSessionFile = requireString(result.sessionEntry.sessionFile, "next session file");
+    const nextContents = await fs.readFile(nextSessionFile, "utf-8").catch(() => "");
+    expect(nextContents).not.toContain(sensitiveGroupText);
+  });
+
+  it("does not continue prior transcript text for explicit reset commands", async () => {
+    vi.setSystemTime(new Date(2026, 0, 18, 5, 30, 0));
+    const root = await makeCaseDir("openclaw-reset-explicit-no-replay-");
+    const storePath = path.join(root, "sessions.json");
+    const previousSessionFile = path.join(root, "previous.jsonl");
+    const sessionKey = "agent:main:whatsapp:direct:explicit-reset";
+    const existingSessionId = "explicit-old-session";
+    const oldDirectText = "direct text that explicit reset must drop";
+
+    await fs.writeFile(
+      previousSessionFile,
+      `${JSON.stringify({ type: "session", id: existingSessionId })}\n${JSON.stringify({
+        type: "message",
+        id: "direct-u1",
+        timestamp: "2026-01-18T04:45:00.000Z",
+        message: { role: "user", content: oldDirectText },
+      })}\n`,
+      "utf-8",
+    );
+
+    await writeSessionStoreFast(storePath, {
+      [sessionKey]: {
+        sessionId: existingSessionId,
+        sessionFile: previousSessionFile,
+        updatedAt: new Date(2026, 0, 18, 5, 20, 0).getTime(),
+      },
+    });
+
+    const result = await initSessionState({
+      ctx: {
+        Body: "/new",
+        RawBody: "/new",
+        CommandBody: "/new",
+        ChatType: "direct",
+        SessionKey: sessionKey,
+      },
+      cfg: { session: { store: storePath } } as OpenClawConfig,
+      commandAuthorized: true,
+    });
+
+    expect(result.isNewSession).toBe(true);
+    expect(result.resetTriggered).toBe(true);
+    expect(result.sessionEntry.resumedFromSessionId).toBeUndefined();
+    const nextSessionFile = requireString(result.sessionEntry.sessionFile, "next session file");
+    const nextContents = await fs.readFile(nextSessionFile, "utf-8").catch(() => "");
+    expect(nextContents).not.toContain(oldDirectText);
+  });
+
   it("keeps legacy idleMinutes behavior without reset config", async () => {
     vi.setSystemTime(new Date(2026, 0, 18, 5, 0, 0));
     const root = await makeCaseDir("openclaw-reset-legacy-");

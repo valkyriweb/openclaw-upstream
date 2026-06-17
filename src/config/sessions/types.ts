@@ -286,6 +286,14 @@ export type SessionEntry = {
   usageFamilyKey?: string;
   /** Session ids known to belong to this usage lineage, including archived predecessors. */
   usageFamilySessionIds?: string[];
+  /** Previous session id whose recent user/assistant turns were carried into this session. */
+  resumedFromSessionId?: string;
+  /** Previous transcript path used as the continuity source, when known. */
+  resumedFromSessionFile?: string;
+  /** Why this session was continued from a prior session id. */
+  resumedFromSessionReason?: string;
+  /** Timestamp (ms) when continuity was attached to this session. */
+  resumedAt?: number;
   /** Timestamp (ms) of the last user/channel interaction that should extend idle lifetime. */
   lastInteractionAt?: number;
   /** Stable first-run start time for subagent sessions, persisted after completion. */

@@ -86,6 +86,7 @@ import {
 import { buildSessionEndHookPayload, buildSessionStartHookPayload } from "./session-hooks.js";
 import { prepareReplySessionParentFork } from "./session-parent-fork-prepare.js";
 import { clearSessionResetRuntimeState } from "./session-reset-cleanup.js";
+import { replayRecentUserAssistantMessages } from "./session-transcript-replay.js";
 
 const log = createSubsystemLogger("session-init");
 
@@ -235,6 +236,19 @@ function resolveSessionConversationBindingContext(
       ? { parentConversationId: bindingContext.parentConversationId }
       : {}),
   };
+}
+
+function isDirectContinuityContext(ctx: MsgContext): boolean {
+  const chatType = ctx.ChatType?.toLowerCase().trim();
+  if (chatType) {
+    return ["direct", "dm", "private", "user"].includes(chatType);
+  }
+  const sessionKey = ctx.SessionKey?.toLowerCase();
+  return Boolean(
+    sessionKey?.includes(":direct:") ||
+    sessionKey?.includes(":dm:") ||
+    sessionKey?.includes(":private:"),
+  );
 }
 
 function resolveBoundConversationSessionKey(params: {
@@ -677,6 +691,9 @@ async function initSessionStateAttemptLocked(
   }
 
   const baseEntry = !isNewSession && effectiveFreshEntry ? reusableEntry : undefined;
+  const shouldContinuePreviousSession = Boolean(previousSessionEntry && !resetTriggered);
+  const shouldReplayPreviousSession =
+    shouldContinuePreviousSession && isDirectContinuityContext(sessionCtxForState);
   const usageFamilyKey = previousSessionEntry
     ? (previousSessionEntry.usageFamilyKey ?? sessionKey)
     : baseEntry?.usageFamilyKey;
@@ -776,6 +793,16 @@ async function initSessionStateAttemptLocked(
     responseUsage: persistedResponseUsage ?? baseEntry?.responseUsage,
     usageFamilyKey,
     usageFamilySessionIds,
+    resumedFromSessionId: shouldContinuePreviousSession
+      ? previousSessionEntry?.sessionId
+      : baseEntry?.resumedFromSessionId,
+    resumedFromSessionFile: shouldContinuePreviousSession
+      ? previousSessionEntry?.sessionFile
+      : baseEntry?.resumedFromSessionFile,
+    resumedFromSessionReason: shouldContinuePreviousSession
+      ? (previousSessionEndReason ?? "unknown")
+      : baseEntry?.resumedFromSessionReason,
+    resumedAt: shouldContinuePreviousSession ? Date.now() : baseEntry?.resumedAt,
     modelOverride: persistedModelOverride ?? baseEntry?.modelOverride,
     providerOverride: persistedProviderOverride ?? baseEntry?.providerOverride,
     modelOverrideSource: persistedModelOverrideSource ?? baseEntry?.modelOverrideSource,
@@ -945,6 +972,21 @@ async function initSessionStateAttemptLocked(
     sessionStore,
   });
   const previousSessionTranscript = committed.previousSessionTranscript;
+  const continuedSessionFile = sessionEntry.sessionFile;
+  const previousReplaySessionFile =
+    previousSessionTranscript.sessionFile ?? previousSessionEntry?.sessionFile;
+  if (shouldReplayPreviousSession && previousSessionEntry && previousReplaySessionFile && continuedSessionFile) {
+    const replayedMessages = await replayRecentUserAssistantMessages({
+      sourceTranscript: previousReplaySessionFile,
+      targetTranscript: continuedSessionFile,
+      newSessionId: sessionEntry.sessionId,
+    });
+    if (replayedMessages > 0) {
+      log.warn(
+        `replayed ${replayedMessages} recent messages into continued session ${sessionEntry.sessionId} from ${previousSessionEntry.sessionId}`,
+      );
+    }
+  }
 
   if (previousSessionEntry?.sessionId) {
     await retireSessionMcpRuntime({
