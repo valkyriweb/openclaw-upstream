@@ -699,7 +699,7 @@ export function buildTtsSystemPromptHint(
   let cfg = cfgInput;
   cfg = resolveTtsRuntimeConfig(cfg);
   const { autoMode, prefsPath } = resolveEffectiveTtsAutoState({ cfg, agentId });
-  if (autoMode === "off") {
+  if (autoMode === "off" || autoMode === "inbound") {
     return undefined;
   }
   const configForTest = resolveTtsConfig(cfg, agentId);
@@ -707,11 +707,9 @@ export function buildTtsSystemPromptHint(
   const maxLength = getTtsMaxLength(prefsPath);
   const summarize = isSummarizationEnabled(prefsPath) ? "on" : "off";
   const autoHint =
-    autoMode === "inbound"
-      ? "Only use TTS when the user's last message includes audio/voice."
-      : autoMode === "tagged"
-        ? "Only use TTS when you include [[tts:key=value]] directives or a [[tts:text]]...[[/tts:text]] block."
-        : undefined;
+    autoMode === "tagged"
+      ? "Only use TTS when you include [[tts:key=value]] directives or a [[tts:text]]...[[/tts:text]] block."
+      : undefined;
   return [
     "Voice (TTS) is enabled.",
     autoHint,

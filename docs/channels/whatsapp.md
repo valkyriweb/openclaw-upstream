@@ -397,6 +397,12 @@ When the linked self number is also present in `allowFrom`, WhatsApp self-chat s
     trigger the reply. If the transcript still does not mention the bot, the
     transcript is kept in pending group history instead of the raw placeholder.
 
+    For the current turn only, WhatsApp audio/voice-note messages also add a
+    modality note to the agent's dynamic system context. Text-only WhatsApp
+    turns do not receive voice capability guidance, so the model is not
+    permanently prompted as voice-capable just because WhatsApp TTS is
+    configured.
+
     Location bodies use terse coordinate text. Location labels/comments and contact/vCard details are rendered as fenced untrusted metadata, not inline prompt text.
 
   </Accordion>

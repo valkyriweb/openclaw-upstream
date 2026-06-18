@@ -1062,6 +1062,113 @@ describe("runPreparedReply media-only handling", () => {
     expect(call?.followupRun.prompt).toContain("[User sent media without caption]");
   });
 
+  it("adds current WhatsApp voice modality context only for audio turns", async () => {
+    await runPreparedReply(
+      baseParams({
+        ctx: {
+          Body: "Please turn this into contacts",
+          RawBody: "Please turn this into contacts",
+          CommandBody: "Please turn this into contacts",
+          MediaPath: "/tmp/voice.ogg",
+          MediaType: "audio/ogg; codecs=opus",
+          MediaTranscribedIndexes: [0],
+          Provider: "whatsapp",
+          Surface: "whatsapp",
+          OriginatingChannel: "whatsapp",
+          OriginatingTo: "whatsapp:+27820000000",
+          ChatType: "direct",
+        },
+        sessionCtx: {
+          Body: "Please turn this into contacts",
+          BodyStripped: "Please turn this into contacts",
+          MediaPath: "/tmp/voice.ogg",
+          MediaType: "audio/ogg; codecs=opus",
+          MediaTranscribedIndexes: [0],
+          Provider: "whatsapp",
+          Surface: "whatsapp",
+          OriginatingChannel: "whatsapp",
+          OriginatingTo: "whatsapp:+27820000000",
+          ChatType: "direct",
+        },
+      }),
+    );
+
+    const call = requireRunReplyAgentCall();
+    expect(call.followupRun.run.extraSystemPrompt).toContain("Current WhatsApp modality:");
+    expect(call.followupRun.run.extraSystemPrompt).toContain(
+      "Do not claim you are text-only or that voice notes are unsupported",
+    );
+    expect(call.followupRun.run.extraSystemPromptStatic).not.toContain(
+      "Current WhatsApp modality:",
+    );
+  });
+
+  it("does not add WhatsApp voice modality context for text-only WhatsApp turns", async () => {
+    await runPreparedReply(
+      baseParams({
+        ctx: {
+          Body: "Please turn this into contacts",
+          RawBody: "Please turn this into contacts",
+          CommandBody: "Please turn this into contacts",
+          Provider: "whatsapp",
+          Surface: "whatsapp",
+          OriginatingChannel: "whatsapp",
+          OriginatingTo: "whatsapp:+27820000000",
+          ChatType: "direct",
+        },
+        sessionCtx: {
+          Body: "Please turn this into contacts",
+          BodyStripped: "Please turn this into contacts",
+          Provider: "whatsapp",
+          Surface: "whatsapp",
+          OriginatingChannel: "whatsapp",
+          OriginatingTo: "whatsapp:+27820000000",
+          ChatType: "direct",
+        },
+      }),
+    );
+
+    const call = requireRunReplyAgentCall();
+    expect(call.followupRun.run.extraSystemPrompt ?? "").not.toContain(
+      "Current WhatsApp modality:",
+    );
+  });
+
+  it("does not add WhatsApp voice modality context for untranscribed audio", async () => {
+    await runPreparedReply(
+      baseParams({
+        ctx: {
+          Body: "<media:audio>",
+          RawBody: "<media:audio>",
+          CommandBody: "<media:audio>",
+          MediaPath: "/tmp/voice-too-large.ogg",
+          MediaType: "audio/ogg",
+          Provider: "whatsapp",
+          Surface: "whatsapp",
+          OriginatingChannel: "whatsapp",
+          OriginatingTo: "whatsapp:+27820000000",
+          ChatType: "direct",
+        },
+        sessionCtx: {
+          Body: "<media:audio>",
+          BodyStripped: "<media:audio>",
+          MediaPath: "/tmp/voice-too-large.ogg",
+          MediaType: "audio/ogg",
+          Provider: "whatsapp",
+          Surface: "whatsapp",
+          OriginatingChannel: "whatsapp",
+          OriginatingTo: "whatsapp:+27820000000",
+          ChatType: "direct",
+        },
+      }),
+    );
+
+    const call = requireRunReplyAgentCall();
+    expect(call.followupRun.run.extraSystemPrompt ?? "").not.toContain(
+      "Current WhatsApp modality:",
+    );
+  });
+
   it("hydrates current image MediaPaths by extension when MediaTypes are missing", async () => {
     const tmpDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-followup-image-"));
     cleanupPaths.push(tmpDir);

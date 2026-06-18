@@ -47,6 +47,10 @@ import {
 } from "../../sessions/user-turn-transcript.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
 import type { SilentReplyConversationType } from "../../shared/silent-reply-policy.js";
+import {
+  normalizeOptionalLowercaseString,
+  normalizeOptionalString,
+} from "../../shared/string-coerce.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
 import { hasControlCommand } from "../command-detection.js";
 import { resolveCommandTurnTargetSessionKey } from "../command-turn-context.js";
@@ -82,6 +86,7 @@ import {
   buildGroupIntro,
   resolveGroupSilentReplyBehavior,
 } from "./groups.js";
+import { hasInboundAudioTranscript, isInboundAudioContext } from "./inbound-audio.js";
 import { hasInboundAudio, hasInboundMedia } from "./inbound-media.js";
 import {
   buildInboundMetaSystemPrompt,
@@ -234,6 +239,42 @@ export function resolvePromptSilentReplyConversationType(params: {
 function normalizePromptRouteChannel(raw?: string | null): string | undefined {
   const normalized = normalizeOptionalString(raw);
   return normalized && normalized !== "none" ? normalized : undefined;
+}
+
+function isWhatsAppPromptContext(
+  ctx: Pick<MsgContext, "OriginatingChannel" | "Provider" | "Surface">,
+): boolean {
+  return [ctx.Surface, ctx.Provider, ctx.OriginatingChannel]
+    .map((value) => normalizeOptionalLowercaseString(value))
+    .some((value) => value === "whatsapp");
+}
+
+function buildCurrentModalitySystemPrompt(params: {
+  ctx: MsgContext;
+  promptSessionCtx: TemplateContext;
+  sessionCtx: TemplateContext;
+}): string {
+  if (
+    !isWhatsAppPromptContext(params.promptSessionCtx) &&
+    !isWhatsAppPromptContext(params.sessionCtx) &&
+    !isWhatsAppPromptContext(params.ctx)
+  ) {
+    return "";
+  }
+  const hasInboundAudio =
+    isInboundAudioContext(params.sessionCtx) || isInboundAudioContext(params.ctx);
+  const hasTranscriptEvidence =
+    hasInboundAudioTranscript(params.sessionCtx) || hasInboundAudioTranscript(params.ctx);
+  if (!hasInboundAudio || !hasTranscriptEvidence) {
+    return "";
+  }
+  return [
+    "Current WhatsApp modality:",
+    "- The latest user message was a WhatsApp voice note/audio message.",
+    "- OpenClaw already transcribed it before this turn; answer from the transcript/content you received.",
+    "- Do not claim you are text-only or that voice notes are unsupported in this conversation.",
+    "- Keep the reply voice-friendly; OpenClaw may deliver it as a WhatsApp voice note when channel TTS policy permits.",
+  ].join("\n");
 }
 
 function normalizeToolProgressDetail(value: unknown): "explain" | "raw" | undefined {
@@ -659,8 +700,14 @@ export async function runPreparedReply(
     fullAccessAvailable: fullAccessState.available,
     fullAccessBlockedReason: fullAccessState.blockedReason,
   });
+  const currentModalitySystemPrompt = buildCurrentModalitySystemPrompt({
+    ctx,
+    promptSessionCtx,
+    sessionCtx,
+  });
   const extraSystemPromptParts = [
     inboundMetaPrompt,
+    currentModalitySystemPrompt,
     directChatContext,
     groupChatContext,
     groupIntro,

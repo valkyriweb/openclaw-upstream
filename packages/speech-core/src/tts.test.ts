@@ -254,6 +254,16 @@ describe("speech-core native voice-note routing", () => {
     );
   });
 
+  it("omits static voice guidance for inbound-only TTS mode", () => {
+    const cfg = createTtsConfig("openclaw-speech-core-tts-inbound-static-hint-test");
+    if (!cfg.messages?.tts) {
+      throw new Error("expected tts config");
+    }
+    cfg.messages.tts.auto = "inbound";
+
+    expect(buildTtsSystemPromptHint(cfg)).toBeUndefined();
+  });
+
   it("marks Discord auto TTS replies as native voice messages", async () => {
     await expectTtsPayloadResult({
       channel: "discord",
