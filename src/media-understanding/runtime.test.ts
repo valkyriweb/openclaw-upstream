@@ -520,6 +520,32 @@ describe("media-understanding runtime", () => {
     });
   });
 
+  it("derives mime from the file extension for local explicit image descriptions without a mime arg", async () => {
+    // Regression: the CLI (`openclaw infer image describe --file foo.png --model ...`)
+    // passes only a file path, so params.mime is undefined. The local-file branch must
+    // fall back to extension detection, otherwise downstream defaults to image/jpeg and
+    // Anthropic rejects the PNG with a 400 media-type mismatch. (ISSUE-149 Phase 3.)
+    mocks.readLocalFileSafely.mockResolvedValue({ buffer: Buffer.from("png-bytes") });
+
+    await describeImageFileWithModel({
+      filePath: "/tmp/sample.png",
+      provider: "zai",
+      model: "glm-4.6v",
+      prompt: "Describe it",
+      cfg: {} as OpenClawConfig,
+      agentDir: "/tmp/agent",
+    });
+
+    expect(mocks.readLocalFileSafely).toHaveBeenCalled();
+    expect(mocks.describeImageWithModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buffer: Buffer.from("png-bytes"),
+        fileName: "sample.png",
+        mime: "image/png",
+      }),
+    );
+  });
+
   it("normalizes local HEIC explicit image descriptions before provider execution", async () => {
     mocks.readLocalFileSafely.mockResolvedValue({ buffer: Buffer.from("heic-source") });
 

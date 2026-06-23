@@ -313,7 +313,11 @@ async function readImageDescriptionInput(params: {
     return {
       buffer: (await readLocalFileSafely({ filePath: params.filePath })).buffer,
       fileName: basenameFromMediaReference(params.filePath),
-      mime: params.mime,
+      // Mirror the remote branch: the CLI passes only a file path (no mime), so
+      // fall back to extension-based detection. Without this the mime stays
+      // undefined and buildImageContext defaults to image/jpeg, making Anthropic
+      // reject every PNG/webp with a 400 media-type mismatch. (ISSUE-149.)
+      mime: concreteMime(params.mime) ?? mimeTypeFromFilePath(params.filePath),
     };
   }
   const attachments = normalizeMediaAttachments(
