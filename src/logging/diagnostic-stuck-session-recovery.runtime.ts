@@ -30,8 +30,14 @@ import { isDiagnosticSessionStateCurrent } from "./diagnostic-session-state.js";
 
 // Runtime repair path for diagnostic sessions that appear stuck in processing/waiting states.
 const STUCK_SESSION_ABORT_SETTLE_MS = 15_000;
+// ISSUE-137: after a stuck-session recovery mutates a lane/run, do not
+// immediately recover the same key again. The 2026-06-09 incident re-entered
+// `abort_embedded_run` twice for the same WhatsApp lane; the cooldown converts
+// that loop into observe-only until the operator/root-cause path catches up.
+const STUCK_SESSION_POST_RECOVERY_COOLDOWN_MS = 10 * 60_000;
 const STUCK_SESSION_PROGRESS_STALE_MS = 5 * 60_000;
 const recoveriesInFlight = new Set<string>();
+const recoveryCooldownUntilByKey = new Map<string, number>();
 
 /** Request parameters accepted by the stuck-session recovery runtime. */
 type StuckSessionRecoveryParams = StuckSessionRecoveryRequest;
@@ -58,6 +64,23 @@ function isActiveRunProgressStale(params: {
   });
   const lastProgressAgeMs = activity.lastProgressAgeMs;
   return typeof lastProgressAgeMs === "number" && lastProgressAgeMs >= params.staleAbortMs;
+}
+
+function pruneRecoveryCooldowns(now: number): void {
+  for (const [key, until] of recoveryCooldownUntilByKey) {
+    if (until <= now) {
+      recoveryCooldownUntilByKey.delete(key);
+    }
+  }
+}
+
+function isRecoveryCooldownActive(key: string, now: number): boolean {
+  pruneRecoveryCooldowns(now);
+  return (recoveryCooldownUntilByKey.get(key) ?? 0) > now;
+}
+
+function markRecoveryCooldown(key: string, now: number): void {
+  recoveryCooldownUntilByKey.set(key, now + STUCK_SESSION_POST_RECOVERY_COOLDOWN_MS);
 }
 
 function formatRecoveryContext(
@@ -94,6 +117,17 @@ export async function recoverStuckDiagnosticSession(
       status: "skipped",
       action: "observe_only",
       reason: key ? "already_in_flight" : "missing_session_ref",
+      sessionId: params.sessionId,
+      sessionKey: params.sessionKey,
+    };
+  }
+
+  const now = Date.now();
+  if (isRecoveryCooldownActive(key, now)) {
+    return {
+      status: "skipped",
+      action: "observe_only",
+      reason: "post_recovery_cooldown",
       sessionId: params.sessionId,
       sessionKey: params.sessionKey,
     };
@@ -307,6 +341,9 @@ export async function recoverStuckDiagnosticSession(
               lane: sessionLane ?? undefined,
             };
       diag.warn(`stuck session recovery outcome: ${formatRecoveryOutcome(outcome)}`);
+      if (aborted || forceCleared || released > 0) {
+        markRecoveryCooldown(key, now);
+      }
       return outcome;
     }
     const outcome: StuckSessionRecoveryOutcome = {
@@ -343,6 +380,7 @@ export async function recoverStuckDiagnosticSession(
 export const testing = {
   resetRecoveriesInFlight(): void {
     recoveriesInFlight.clear();
+    recoveryCooldownUntilByKey.clear();
   },
 };
 export { testing as __testing };

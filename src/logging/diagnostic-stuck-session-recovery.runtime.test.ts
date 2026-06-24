@@ -202,6 +202,71 @@ describe("stuck session recovery", () => {
     expect(mocks.resetCommandLane).not.toHaveBeenCalled();
   });
 
+  // ISSUE-137b: post-recovery cooldown — after a recovery mutates a lane/run,
+  // the same key must not immediately re-enter abort_embedded_run (2026-06-09
+  // WhatsApp lane abort-loop incident).
+  it("skips repeated recovery during the post-recovery cooldown", async () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    try {
+      mocks.resolveActiveEmbeddedRunHandleSessionId.mockReturnValue("session-1");
+      mocks.abortEmbeddedAgentRun.mockReturnValue(true);
+      mocks.waitForEmbeddedAgentRunEnd.mockResolvedValue(true);
+
+      const first = await recoverStuckDiagnosticSession({
+        sessionId: "session-1",
+        sessionKey: "agent:main:main",
+        ageMs: 180_000,
+        allowActiveAbort: true,
+      });
+      const second = await recoverStuckDiagnosticSession({
+        sessionId: "session-1",
+        sessionKey: "agent:main:main",
+        ageMs: 240_000,
+        allowActiveAbort: true,
+      });
+
+      expect(first.status).toBe("aborted");
+      expect(second).toMatchObject({
+        status: "skipped",
+        action: "observe_only",
+        reason: "post_recovery_cooldown",
+      });
+      expect(mocks.abortEmbeddedAgentRun).toHaveBeenCalledTimes(1);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("allows recovery again after the post-recovery cooldown expires", async () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    try {
+      mocks.resolveActiveEmbeddedRunHandleSessionId.mockReturnValue("session-1");
+      mocks.abortEmbeddedAgentRun.mockReturnValue(true);
+      mocks.waitForEmbeddedAgentRunEnd.mockResolvedValue(true);
+
+      const first = await recoverStuckDiagnosticSession({
+        sessionId: "session-1",
+        sessionKey: "agent:main:main",
+        ageMs: 180_000,
+        allowActiveAbort: true,
+      });
+      // Advance past the 10-minute cooldown window.
+      nowSpy.mockReturnValue(1_000_000 + 10 * 60_000 + 1);
+      const second = await recoverStuckDiagnosticSession({
+        sessionId: "session-1",
+        sessionKey: "agent:main:main",
+        ageMs: 240_000,
+        allowActiveAbort: true,
+      });
+
+      expect(first.status).toBe("aborted");
+      expect(second.status).toBe("aborted");
+      expect(mocks.abortEmbeddedAgentRun).toHaveBeenCalledTimes(2);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it("returns an abort outcome for a stale tool call on an active embedded run", async () => {
     mocks.resolveActiveEmbeddedRunHandleSessionId.mockReturnValue("session-tool");
     mocks.abortEmbeddedAgentRun.mockReturnValue(true);
