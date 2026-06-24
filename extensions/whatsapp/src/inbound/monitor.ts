@@ -35,8 +35,8 @@ import {
   resolveWhatsAppSocketOperationTimeoutMs,
   resolveWhatsAppSocketTiming,
   withWhatsAppSocketOperationTimeout,
+  type ResolvedWhatsAppSocketTiming,
   type WhatsAppSocketOperationAdapter,
-  type WhatsAppSocketTimingOptions,
 } from "../socket-timing.js";
 import { resolveEquivalentWhatsAppDirectChatJids, resolveJidToE164 } from "../text-runtime.js";
 import {
@@ -265,7 +265,7 @@ type AdmittedWebInboundCallbackMessage = WebInboundMessage & {
 type MonitorWebInboxOptions = {
   cfg: OpenClawConfig;
   loadConfig?: () => OpenClawConfig;
-  socketTiming?: Required<WhatsAppSocketTimingOptions>;
+  socketTiming?: ResolvedWhatsAppSocketTiming;
   verbose: boolean;
   accountId: string;
   authDir: string;
@@ -304,7 +304,7 @@ type AttachWebInboxToSocketOptions = Omit<
   MonitorWebInboxOptions,
   "onMessage" | "shouldDebounce" | "socketTiming"
 > & {
-  socketTiming: Required<WhatsAppSocketTimingOptions>;
+  socketTiming: ResolvedWhatsAppSocketTiming;
   onMessage: (msg: WebInboundMessageInput) => Promise<void>;
   shouldDebounce?: (msg: WebInboundMessageInput) => boolean;
 };

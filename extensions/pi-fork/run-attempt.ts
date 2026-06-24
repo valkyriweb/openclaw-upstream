@@ -335,7 +335,9 @@ async function buildHookedPiPromptCommand(
     prompt: shaped.prompt ?? "",
     developerInstructions: shaped.extraSystemPrompt ?? "",
     messages: [],
-    ctx: params,
+    // Upstream tightened AgentHarnessHookContext.senderId to string|undefined;
+    // attempt params still allow null, so coerce it for the hook context.
+    ctx: { ...params, senderId: params.senderId ?? undefined },
   });
 
   return buildPiPromptCommand(

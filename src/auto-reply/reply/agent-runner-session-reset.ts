@@ -5,6 +5,7 @@ import {
   resolveSessionTranscriptPath,
 } from "../../config/sessions.js";
 import { persistSessionResetLifecycle } from "../../config/sessions/session-accessor.js";
+import { replayRecentUserAssistantMessages } from "../../config/sessions/transcript-replay.js";
 import { generateSecureUuid } from "../../infra/secure-random.js";
 import { defaultRuntime } from "../../runtime.js";
 import { refreshQueuedFollowupSession, type FollowupRun } from "./queue.js";

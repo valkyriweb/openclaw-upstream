@@ -86,7 +86,7 @@ import {
 import { buildSessionEndHookPayload, buildSessionStartHookPayload } from "./session-hooks.js";
 import { prepareReplySessionParentFork } from "./session-parent-fork-prepare.js";
 import { clearSessionResetRuntimeState } from "./session-reset-cleanup.js";
-import { replayRecentUserAssistantMessages } from "./session-transcript-replay.js";
+import { replayRecentUserAssistantMessages } from "../../config/sessions/transcript-replay.js";
 
 const log = createSubsystemLogger("session-init");
 

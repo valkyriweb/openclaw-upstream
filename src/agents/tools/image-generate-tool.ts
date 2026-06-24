@@ -56,7 +56,6 @@ import {
 import { optionalStringEnum } from "../schema/string-enum.js";
 import {
   ToolInputError,
-  readNumberParam,
   readNonNegativeIntegerParam,
   readPositiveIntegerParam,
   readStringParam,

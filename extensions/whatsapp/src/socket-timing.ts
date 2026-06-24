@@ -54,11 +54,20 @@ function positiveInteger(value: number | undefined): number | undefined {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
+// Fully-resolved timing: the three timeout fields are always populated from
+// override/config/default; onPresencePingSuccess stays optional (callback-only,
+// never config-sourced). Upstream consumers that previously typed socketTiming as
+// `Required<WhatsAppSocketTimingOptions>` use this so our added callback does not
+// force them to supply it (ISSUE-142).
+export type ResolvedWhatsAppSocketTiming = Required<
+  Omit<WhatsAppSocketTimingOptions, "onPresencePingSuccess">
+> &
+  Pick<WhatsAppSocketTimingOptions, "onPresencePingSuccess">;
+
 export function resolveWhatsAppSocketTiming(
   cfg: OpenClawConfig,
   overrides?: WhatsAppSocketTimingOptions,
-): Required<Omit<WhatsAppSocketTimingOptions, "onPresencePingSuccess">> &
-  Pick<WhatsAppSocketTimingOptions, "onPresencePingSuccess"> {
+): ResolvedWhatsAppSocketTiming {
   const configured = cfg.web?.whatsapp;
   return {
     keepAliveIntervalMs:
