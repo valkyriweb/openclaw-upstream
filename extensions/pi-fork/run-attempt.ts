@@ -21,7 +21,9 @@ import {
   resolveAgentHarnessBeforePromptBuildResult as resolveBeforePromptBuild,
   setActiveEmbeddedRun,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
 import { emitTrustedDiagnosticEvent } from "openclaw/plugin-sdk/diagnostic-runtime";
+import { recordPiTurnCanonically } from "./canonical-recorder.js";
 import type { PiHarnessConfig } from "./config.js";
 import { buildPiRpcPrompt } from "./prompt-contract.js";
 import {
@@ -497,19 +499,44 @@ export async function runPiRpcAttempt(
       }
 
       const resolveResult = (finalText: string, finalMessages: unknown[]) => {
-        resolve(
-          buildAttemptResult({
-            assistantText: finalText,
-            toolMetas,
-            activeToolCount: toolCallIds.size,
-            messagesSnapshot: finalMessages,
-            sessionIdUsed: sessionId,
-            aborted: opts.aborted ?? false,
-            externalAbort: opts.externalAbort ?? false,
-            timedOut: opts.timedOut ?? false,
-            promptError: opts.promptError ?? (promptErrored ? new Error(promptErrorMsg) : null),
-          }),
-        );
+        // Mirror pi's authoritative snapshot into the canonical OpenClaw
+        // transcript before resolving. The await ordering is load-bearing: the
+        // next (session-lane-serialized) turn reads the canonical message count
+        // as its append cursor, so a fire-and-forget mirror would let it observe
+        // a stale count and double-append. Best-effort — a mirror failure must
+        // never drop or delay-fail the reply, only this turn's canonical record.
+        void (async () => {
+          try {
+            await recordPiTurnCanonically(
+              {
+                sessionFile: shaped.sessionFile,
+                sessionId,
+                cwd: shaped.workspaceDir,
+                config: (params as { config?: OpenClawConfig }).config,
+              },
+              finalMessages,
+            );
+          } catch (err) {
+            embeddedAgentLog.warn("pi-fork canonical transcript mirror failed", {
+              sessionId,
+              sessionKey,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+          resolve(
+            buildAttemptResult({
+              assistantText: finalText,
+              toolMetas,
+              activeToolCount: toolCallIds.size,
+              messagesSnapshot: finalMessages,
+              sessionIdUsed: sessionId,
+              aborted: opts.aborted ?? false,
+              externalAbort: opts.externalAbort ?? false,
+              timedOut: opts.timedOut ?? false,
+              promptError: opts.promptError ?? (promptErrored ? new Error(promptErrorMsg) : null),
+            }),
+          );
+        })();
       };
 
       // Query authoritative text from pi after agent_end, if not aborted/errored
