@@ -67,7 +67,7 @@ function makeFakePi(snapshot: unknown[], finalText: string) {
   const listeners = new Set<(e: Json) => void>();
   const onClose = new Set<() => void>();
   const dispatch = (e: Json) => {
-    for (const l of [...listeners]) {
+    for (const l of listeners) {
       l(e);
     }
   };
