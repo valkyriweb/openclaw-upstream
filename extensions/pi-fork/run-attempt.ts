@@ -21,7 +21,7 @@ import {
   resolveAgentHarnessBeforePromptBuildResult as resolveBeforePromptBuild,
   setActiveEmbeddedRun,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { emitTrustedDiagnosticEvent } from "openclaw/plugin-sdk/diagnostic-runtime";
 import { recordPiTurnCanonically } from "./canonical-recorder.js";
 import type { PiHarnessConfig } from "./config.js";

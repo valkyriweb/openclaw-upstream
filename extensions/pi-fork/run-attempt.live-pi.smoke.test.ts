@@ -93,7 +93,6 @@ describe.skipIf(!LIVE)("pi-fork live real-pi -> canonical transcript (smoke)", (
       expect(roles).toContain("user");
       expect(roles).toContain("assistant");
       expect(await countCanonicalTranscriptMessages(sessionFile)).toBe(messages.length);
-      // eslint-disable-next-line no-console
       console.log(`[live-smoke] canonical messages=${messages.length} roles=${roles.join(",")}`);
     } finally {
       process.env.HOME = origHome;

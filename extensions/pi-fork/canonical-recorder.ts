@@ -29,7 +29,7 @@
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { appendSessionTranscriptMessage } from "openclaw/plugin-sdk/agent-harness-runtime";
-import type { OpenClawConfig } from "openclaw/plugin-sdk/config-runtime";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 
 export type PiCanonicalRecorderTarget = {
   /** Canonical transcript path resolved by core (params.sessionFile). */

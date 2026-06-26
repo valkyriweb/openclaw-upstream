@@ -113,7 +113,6 @@ function makeFakePi(snapshot: unknown[], finalText: string) {
             data: { messages: snapshot },
           }),
         );
-        return;
       }
     },
   };
