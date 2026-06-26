@@ -22,7 +22,7 @@ import {
 } from "./paths.js";
 import type { TrajectoryEvent, TrajectoryToolDefinition } from "./types.js";
 
-type TrajectoryRuntimeInit = {
+export type TrajectoryRuntimeInit = {
   cfg?: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
   maxRuntimeFileBytes?: number;
@@ -37,7 +37,7 @@ type TrajectoryRuntimeInit = {
   writer?: TrajectoryRuntimeWriter;
 };
 
-type TrajectoryRuntimeRecorder = {
+export type TrajectoryRuntimeRecorder = {
   enabled: true;
   filePath: string;
   recordEvent: (type: string, data?: Record<string, unknown>) => void;

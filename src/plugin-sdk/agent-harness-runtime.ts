@@ -302,6 +302,8 @@ export { appendSessionTranscriptMessage } from "../config/sessions/transcript-ap
  * a session identity instead of an active JSONL transcript file.
  */
 export { emitSessionTranscriptUpdate } from "../sessions/transcript-events.js";
+export { createTrajectoryRuntimeRecorder } from "../trajectory/runtime.js";
+export type { TrajectoryRuntimeInit, TrajectoryRuntimeRecorder } from "../trajectory/runtime.js";
 export {
   consumeAdjustedParamsForToolCall,
   consumePreExecutionBlockedToolCall,
