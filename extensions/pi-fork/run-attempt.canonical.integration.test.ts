@@ -190,4 +190,50 @@ describe("pi-fork run-attempt -> canonical transcript (integration)", () => {
       "assistant",
     ]);
   });
+
+  it("emits the turn lifecycle into the canonical trajectory keyed to the session", async () => {
+    // Direct the runtime trajectory into the temp dir so the assertion is
+    // deterministic regardless of the host env. Baseline (pre-trajectory pi-fork)
+    // wrote no trajectory file for a pi turn, so this read ENOENTs on baseline.
+    const trajDir = path.join(dir, "traj");
+    const prevDir = process.env.OPENCLAW_TRAJECTORY_DIR;
+    const prevEnabled = process.env.OPENCLAW_TRAJECTORY;
+    process.env.OPENCLAW_TRAJECTORY_DIR = trajDir;
+    process.env.OPENCLAW_TRAJECTORY = "1";
+    try {
+      const snapshot = [userMsg("ping"), assistantMsg("pong")];
+      piSlot.factory = () => makeFakePi(snapshot, "pong");
+      await runPiRpcAttempt(makeParams(sessionFile, "ping"), { turnTimeoutMs: 4_000 });
+
+      const trajFile = path.join(trajDir, "sess-int-1.jsonl");
+      const events = (await readFile(trajFile, "utf8"))
+        .split("\n")
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line) as { type: string; sessionId?: string; data?: Json });
+      const types = events.map((e) => e.type);
+      expect(types).toContain("session.started");
+      expect(types).toContain("prompt.submitted");
+      expect(types).toContain("model.completed");
+      expect(types.filter((t) => t === "session.ended")).toHaveLength(1);
+      // Keyed to the canonical session id, not pi's private "fake-pi" session.
+      for (const event of events) {
+        expect(event.sessionId).toBe("sess-int-1");
+      }
+      const submitted = events.find((e) => e.type === "prompt.submitted");
+      expect(typeof submitted?.data?.prompt).toBe("string");
+      const ended = events.find((e) => e.type === "session.ended");
+      expect(ended?.data?.status).toBe("ok");
+    } finally {
+      if (prevDir === undefined) {
+        delete process.env.OPENCLAW_TRAJECTORY_DIR;
+      } else {
+        process.env.OPENCLAW_TRAJECTORY_DIR = prevDir;
+      }
+      if (prevEnabled === undefined) {
+        delete process.env.OPENCLAW_TRAJECTORY;
+      } else {
+        process.env.OPENCLAW_TRAJECTORY = prevEnabled;
+      }
+    }
+  });
 });

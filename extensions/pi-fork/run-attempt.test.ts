@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { queueAgentHarnessMessage } from "openclaw/plugin-sdk/agent-harness-runtime";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   buildAttemptResult,
   buildPiPromptCommand,
@@ -10,6 +10,23 @@ import {
   runPiRpcAttempt,
 } from "./run-attempt.js";
 import { clearPiProcess, getOrCreatePiProcess } from "./session-binding.js";
+
+// These turns set no sessionFile, so the default-on runtime trajectory recorder
+// would spill <sessionId>.trajectory.jsonl into the repo cwd. None of these
+// tests assert trajectory (see trajectory-recorder.test.ts +
+// run-attempt.canonical.integration.test.ts for that), so disable capture here.
+let prevTrajectoryEnv: string | undefined;
+beforeAll(() => {
+  prevTrajectoryEnv = process.env.OPENCLAW_TRAJECTORY;
+  process.env.OPENCLAW_TRAJECTORY = "0";
+});
+afterAll(() => {
+  if (prevTrajectoryEnv === undefined) {
+    delete process.env.OPENCLAW_TRAJECTORY;
+  } else {
+    process.env.OPENCLAW_TRAJECTORY = prevTrajectoryEnv;
+  }
+});
 
 async function pollUntil<T>(
   fn: () => T | Promise<T>,

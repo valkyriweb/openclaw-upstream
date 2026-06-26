@@ -1,4 +1,20 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Disable default-on runtime trajectory capture: these turns use relative/cwd
+// sessionFiles, so the recorder would spill session.trajectory.jsonl into the
+// repo cwd. No test here asserts trajectory.
+let prevHarnessTrajectoryEnv: string | undefined;
+beforeAll(() => {
+  prevHarnessTrajectoryEnv = process.env.OPENCLAW_TRAJECTORY;
+  process.env.OPENCLAW_TRAJECTORY = "0";
+});
+afterAll(() => {
+  if (prevHarnessTrajectoryEnv === undefined) {
+    delete process.env.OPENCLAW_TRAJECTORY;
+  } else {
+    process.env.OPENCLAW_TRAJECTORY = prevHarnessTrajectoryEnv;
+  }
+});
 
 const { getOrCreatePiProcess, sendPiRpcCommand, clearPiProcess, clearAllPiProcesses } = vi.hoisted(
   () => ({
