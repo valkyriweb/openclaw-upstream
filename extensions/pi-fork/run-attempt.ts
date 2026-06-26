@@ -18,6 +18,7 @@ import type {
 import {
   clearActiveEmbeddedRun,
   embeddedAgentLog,
+  formatErrorMessage,
   resolveAgentHarnessBeforePromptBuildResult as resolveBeforePromptBuild,
   setActiveEmbeddedRun,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
@@ -33,6 +34,7 @@ import {
   sendPiRpcCommand,
   type PiRpcProcess,
 } from "./session-binding.js";
+import { createPiTrajectoryRecorder } from "./trajectory-recorder.js";
 
 const DEFAULT_TURN_TIMEOUT_MS = 5 * 60 * 1_000; // 5 minutes
 /** How long an externally-aborted pi turn may keep running before the process is replaced. */
@@ -427,6 +429,28 @@ export async function runPiRpcAttempt(
     let done = false;
     let healed = false;
     let unknownEventCount = 0;
+
+    // Mirror this pi turn into the canonical OpenClaw trajectory
+    // (`<session>.trajectory.jsonl`) keyed to the same session as the canonical
+    // transcript, so the trajectory pipeline (trace inspection, replay, the
+    // lab-parity gate) sees pi-fork turns. Best-effort: a null recorder (capture
+    // disabled) or any emit/flush failure never affects the reply.
+    const trajectoryRecorder = createPiTrajectoryRecorder({
+      sessionId,
+      sessionFile: shaped.sessionFile,
+      sessionKey,
+      runId: shaped.runId,
+      workspaceDir: shaped.workspaceDir,
+      provider: shaped.provider,
+      modelId: shaped.modelId,
+      config: (params as { config?: OpenClawConfig }).config,
+    });
+    trajectoryRecorder?.recordSessionStarted({
+      sessionFile: shaped.sessionFile,
+      workspaceDir: shaped.workspaceDir,
+      provider: shaped.provider,
+      modelId: shaped.modelId,
+    });
     let lastProgressAt = 0;
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     let closeHandler: (() => void) | undefined;
@@ -523,6 +547,30 @@ export async function runPiRpcAttempt(
               error: err instanceof Error ? err.message : String(err),
             });
           }
+          // Terminal trajectory events. recordSessionEnded is idempotent, and
+          // flush is awaited before resolve so the trajectory file is durable
+          // when the reply is acknowledged (matching the canonical mirror).
+          const terminalError =
+            opts.promptError != null
+              ? formatErrorMessage(opts.promptError)
+              : promptErrored
+                ? promptErrorMsg || undefined
+                : undefined;
+          trajectoryRecorder?.recordModelCompleted({
+            aborted: opts.aborted ?? false,
+            externalAbort: opts.externalAbort ?? false,
+            timedOut: opts.timedOut ?? false,
+            promptError: terminalError,
+            assistantText: finalText,
+            messagesSnapshot: finalMessages,
+          });
+          trajectoryRecorder?.recordSessionEnded({
+            aborted: opts.aborted ?? false,
+            externalAbort: opts.externalAbort ?? false,
+            timedOut: opts.timedOut ?? false,
+            promptError: terminalError,
+          });
+          await trajectoryRecorder?.flush();
           resolve(
             buildAttemptResult({
               assistantText: finalText,
@@ -837,5 +885,6 @@ export async function runPiRpcAttempt(
     // Send the prompt
     touchProgress("prompt_sent", { force: true });
     piProcess.send(promptCommand);
+    trajectoryRecorder?.recordPromptSubmitted({ prompt: promptCommand.message });
   });
 }
