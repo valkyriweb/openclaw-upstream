@@ -614,6 +614,72 @@ describe("streamOpenAICodexResponses transport", () => {
     expect(capturedPayload).not.toHaveProperty("max_output_tokens");
   });
 
+  it.each([
+    "https://chatgpt.com/backend-api",
+    "https://chatgpt.com/backend-api/v1",
+    "https://chatgpt.com/backend-api/codex",
+    "https://chatgpt.com/backend-api/codex/v1",
+    "https://chatgpt.com/backend-api/codex/responses",
+  ])("normalizes native ChatGPT Codex SSE URL from %s", async (baseUrl) => {
+    let capturedUrl: string | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+        capturedUrl = String(input);
+        return new Response("usage limit: url captured", { status: 400 });
+      }),
+    );
+
+    const stream = streamOpenAICodexResponses(
+      {
+        ...model,
+        baseUrl,
+      },
+      context,
+      {
+        apiKey: createJwt({
+          "https://api.openai.com/auth": {
+            chatgpt_account_id: "acct-1",
+          },
+        }),
+        sessionId: "url-session",
+        transport: "sse",
+      },
+    );
+
+    const result = await stream.result();
+
+    expect(result.stopReason).toBe("error");
+    expect(capturedUrl).toBe("https://chatgpt.com/backend-api/codex/responses");
+  });
+
+  it("rejects plaintext ChatGPT Codex URLs before transport", async () => {
+    const fetchMock = vi.fn(async () => new Response("fetch should not run", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const stream = streamOpenAICodexResponses(
+      {
+        ...model,
+        baseUrl: "http://chatgpt.com/backend-api",
+      },
+      context,
+      {
+        apiKey: createJwt({
+          "https://api.openai.com/auth": {
+            chatgpt_account_id: "acct-1",
+          },
+        }),
+        sessionId: "plaintext-session",
+        transport: "sse",
+      },
+    );
+
+    const result = await stream.result();
+
+    expect(result.stopReason).toBe("error");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it.each(["1.5", "0x10"])(
     "ignores invalid Retry-After header delay values: %s",
     async (retryAfter) => {

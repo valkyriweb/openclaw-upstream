@@ -10,8 +10,6 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 export const OPENAI_PROVIDER_ID = "openai";
 /** Canonical OpenAI provider alias for Codex-backed OpenAI route state. */
 export const OPENAI_CODEX_PROVIDER_ID = OPENAI_PROVIDER_ID;
-/** Legacy transport/auth provider id for ChatGPT Codex OAuth execution. */
-export const OPENAI_CODEX_TRANSPORT_PROVIDER_ID = "openai-codex";
 
 // OpenAI defaults to Codex runtime only for the official API endpoint. Custom
 // base URLs keep their configured provider behavior.
@@ -29,6 +27,28 @@ function isOfficialOpenAIBaseUrl(baseUrl: unknown): boolean {
         url.pathname === "/v1" ||
         url.pathname === "/v1/")
     );
+  } catch {
+    return false;
+  }
+}
+
+function isChatGPTBackendBaseUrl(baseUrl: unknown): boolean {
+  if (typeof baseUrl !== "string" || !baseUrl.trim()) {
+    return false;
+  }
+  try {
+    const url = new URL(baseUrl.trim());
+    if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "chatgpt.com") {
+      return false;
+    }
+    const pathname = url.pathname.replace(/\/+$/u, "").toLowerCase();
+    return [
+      "/backend-api",
+      "/backend-api/v1",
+      "/backend-api/codex",
+      "/backend-api/codex/v1",
+      "/backend-api/codex/responses",
+    ].includes(pathname);
   } catch {
     return false;
   }
@@ -52,7 +72,8 @@ function resolveOpenAIProviderConfig(config: OpenClawConfig | undefined) {
 }
 
 function openAIProviderUsesCustomBaseUrl(config: OpenClawConfig | undefined): boolean {
-  return !isOfficialOpenAIBaseUrl(resolveOpenAIProviderConfig(config)?.baseUrl);
+  const baseUrl = resolveOpenAIProviderConfig(config)?.baseUrl;
+  return !isOfficialOpenAIBaseUrl(baseUrl) && !isChatGPTBackendBaseUrl(baseUrl);
 }
 
 /** Returns true for provider ids that normalize to OpenAI. */
@@ -90,11 +111,6 @@ export function modelSelectionShouldEnsureCodexPlugin(params: {
   return provider === OPENAI_PROVIDER_ID && !openAIProviderUsesCustomBaseUrl(params.config);
 }
 
-// ISSUE-143: native openai/* on the Codex harness must use Codex OAuth transport.
-function runtimeIsCodex(value: string | undefined): boolean {
-  return value?.trim().toLowerCase() === "codex";
-}
-
 /** Lists auth-profile providers for an OpenAI runtime route. */
 export function listOpenAIAuthProfileProvidersForAgentRuntime(params: {
   provider: string;
@@ -105,31 +121,7 @@ export function listOpenAIAuthProfileProvidersForAgentRuntime(params: {
   if (!isOpenAIProvider(params.provider)) {
     return [params.provider];
   }
-  if (
-    !openAIProviderUsesCustomBaseUrl(params.config) &&
-    (runtimeIsCodex(params.harnessRuntime) || runtimeIsCodex(params.agentHarnessId))
-  ) {
-    return [OPENAI_CODEX_TRANSPORT_PROVIDER_ID, OPENAI_PROVIDER_ID];
-  }
   return [OPENAI_PROVIDER_ID];
-}
-
-function resolveOpenAIProviderForRuntime(params: {
-  provider: string;
-  harnessRuntime?: string;
-  agentHarnessId?: string;
-  config?: OpenClawConfig;
-}): string {
-  if (!isOpenAIProvider(params.provider)) {
-    return params.provider;
-  }
-  if (
-    !openAIProviderUsesCustomBaseUrl(params.config) &&
-    (runtimeIsCodex(params.harnessRuntime) || runtimeIsCodex(params.agentHarnessId))
-  ) {
-    return OPENAI_CODEX_TRANSPORT_PROVIDER_ID;
-  }
-  return OPENAI_PROVIDER_ID;
 }
 
 /** Resolves the provider id passed to OpenAI runtime auth/execution paths. */
@@ -142,7 +134,7 @@ export function resolveOpenAIRuntimeProvider(params: {
   config?: OpenClawConfig;
   workspaceDir?: string;
 }): string {
-  return resolveOpenAIProviderForRuntime(params);
+  return isOpenAIProvider(params.provider) ? OPENAI_PROVIDER_ID : params.provider;
 }
 
 /** Resolves the selected provider id displayed for OpenAI runtime routes. */
@@ -155,7 +147,7 @@ export function resolveSelectedOpenAIRuntimeProvider(params: {
   config?: OpenClawConfig;
   workspaceDir?: string;
 }): string {
-  return resolveOpenAIProviderForRuntime(params);
+  return isOpenAIProvider(params.provider) ? OPENAI_PROVIDER_ID : params.provider;
 }
 
 /** Resolves the config provider used for context-window lookup. */

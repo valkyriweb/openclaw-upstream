@@ -5,7 +5,6 @@ import {
   listOpenAIAuthProfileProvidersForAgentRuntime,
   modelSelectionShouldEnsureCodexPlugin,
   OPENAI_CODEX_PROVIDER_ID,
-  OPENAI_CODEX_TRANSPORT_PROVIDER_ID,
   OPENAI_PROVIDER_ID,
   openAIProviderUsesCodexRuntimeByDefault,
   resolveContextConfigProviderForRuntime,
@@ -14,9 +13,8 @@ import {
 } from "./openai-routing.js";
 
 describe("OpenAI runtime routing policy", () => {
-  it("keeps the exported Codex provider alias canonical while transport remains legacy", () => {
+  it("keeps the exported Codex provider alias canonical", () => {
     expect(OPENAI_CODEX_PROVIDER_ID).toBe(OPENAI_PROVIDER_ID);
-    expect(OPENAI_CODEX_TRANSPORT_PROVIDER_ID).toBe("openai-codex");
   });
 
   it("uses Codex by default for official OpenAI agent model selections", () => {
@@ -59,6 +57,60 @@ describe("OpenAI runtime routing policy", () => {
         providers: {
           OpenAI: {
             baseUrl: "https://example.test/v1",
+            models: [],
+          },
+        },
+      },
+    } satisfies OpenClawConfig;
+
+    expect(openAIProviderUsesCodexRuntimeByDefault({ provider: "openai", config })).toBe(false);
+    expect(modelSelectionShouldEnsureCodexPlugin({ model: "openai/gpt-5.5", config })).toBe(false);
+  });
+
+  it("treats ChatGPT backend URLs as Codex transport rather than custom proxies", () => {
+    for (const baseUrl of [
+      "https://chatgpt.com/backend-api",
+      "https://chatgpt.com/backend-api/v1",
+      "https://chatgpt.com/backend-api/codex",
+      "https://chatgpt.com/backend-api/codex/v1",
+      "https://chatgpt.com/backend-api/codex/responses",
+    ]) {
+      const config = {
+        models: {
+          providers: {
+            openai: {
+              baseUrl,
+              models: [],
+            },
+          },
+        },
+      } satisfies OpenClawConfig;
+
+      expect(openAIProviderUsesCodexRuntimeByDefault({ provider: "openai", config })).toBe(true);
+      expect(modelSelectionShouldEnsureCodexPlugin({ model: "openai/gpt-5.5", config })).toBe(true);
+      expect(
+        listOpenAIAuthProfileProvidersForAgentRuntime({
+          provider: "openai",
+          harnessRuntime: "codex",
+          config,
+        }),
+      ).toEqual(["openai"]);
+      expect(
+        resolveOpenAIRuntimeProvider({
+          provider: "openai",
+          harnessRuntime: "codex",
+          config,
+        }),
+      ).toBe("openai");
+    }
+  });
+
+  it("does not treat plaintext ChatGPT URLs as first-party Codex transport", () => {
+    const config = {
+      models: {
+        providers: {
+          openai: {
+            baseUrl: "http://chatgpt.com/backend-api",
             models: [],
           },
         },
@@ -149,7 +201,7 @@ describe("OpenAI runtime routing policy", () => {
     ).toBe("openai");
   });
 
-  it("checks legacy Codex auth before canonical OpenAI for pre-doctor state", () => {
+  it("keeps Codex auth on the canonical OpenAI provider", () => {
     const config = {
       auth: {
         order: {
@@ -246,28 +298,28 @@ describe("OpenAI runtime routing policy", () => {
     ).toBe("openai");
   });
 
-  it("validates Codex harness auth through the Codex OAuth provider before OpenAI aliases", () => {
+  it("validates Codex harness auth through the unified OpenAI provider", () => {
     expect(
       listOpenAIAuthProfileProvidersForAgentRuntime({
         provider: "openai",
         harnessRuntime: "codex",
       }),
-    ).toEqual(["openai-codex", "openai"]);
+    ).toEqual(["openai"]);
   });
 
-  it("uses the Codex transport provider when harness runtime is codex", () => {
+  it("keeps OpenAI as the runtime provider when harness runtime is codex", () => {
     expect(
       resolveSelectedOpenAIRuntimeProvider({
         provider: "openai",
         harnessRuntime: "codex",
       }),
-    ).toBe("openai-codex");
+    ).toBe("openai");
     expect(
       resolveOpenAIRuntimeProvider({
         provider: "openai",
         harnessRuntime: "codex",
       }),
-    ).toBe("openai-codex");
+    ).toBe("openai");
   });
 
   it("does not route non-OpenAI providers when runtime is codex", () => {

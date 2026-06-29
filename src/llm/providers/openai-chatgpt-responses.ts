@@ -595,6 +595,11 @@ function resolveCodexServiceTier(
 
 function resolveCodexUrl(baseUrl?: string): string {
   const raw = baseUrl && baseUrl.trim().length > 0 ? baseUrl : DEFAULT_CODEX_BASE_URL;
+  const nativeChatGPTUrl = resolveNativeChatGPTCodexUrl(raw);
+  if (nativeChatGPTUrl) {
+    return nativeChatGPTUrl;
+  }
+  rejectPlaintextChatGPTCodexUrl(raw);
   const normalized = raw.replace(/\/+$/, "");
   if (normalized.endsWith("/codex/responses")) {
     return normalized;
@@ -603,6 +608,45 @@ function resolveCodexUrl(baseUrl?: string): string {
     return `${normalized}/responses`;
   }
   return `${normalized}/codex/responses`;
+}
+
+function resolveNativeChatGPTCodexUrl(baseUrl: string): string | undefined {
+  try {
+    const url = new URL(baseUrl.trim());
+    if (url.protocol !== "https:") {
+      return undefined;
+    }
+    if (url.hostname.toLowerCase() !== "chatgpt.com") {
+      return undefined;
+    }
+    const pathname = url.pathname.replace(/\/+$/u, "").toLowerCase();
+    if (
+      ![
+        "/backend-api",
+        "/backend-api/v1",
+        "/backend-api/codex",
+        "/backend-api/codex/v1",
+        "/backend-api/codex/responses",
+      ].includes(pathname)
+    ) {
+      return undefined;
+    }
+    return `${url.origin}/backend-api/codex/responses`;
+  } catch {
+    return undefined;
+  }
+}
+
+function rejectPlaintextChatGPTCodexUrl(baseUrl: string): void {
+  let url: URL;
+  try {
+    url = new URL(baseUrl.trim());
+  } catch {
+    return;
+  }
+  if (url.hostname.toLowerCase() === "chatgpt.com" && url.protocol !== "https:") {
+    throw new Error("ChatGPT Codex baseUrl must use https");
+  }
 }
 
 function resolveCodexWebSocketUrl(baseUrl?: string): string {
