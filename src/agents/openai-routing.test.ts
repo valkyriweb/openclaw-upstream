@@ -4,6 +4,9 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   listOpenAIAuthProfileProvidersForAgentRuntime,
   modelSelectionShouldEnsureCodexPlugin,
+  OPENAI_CODEX_PROVIDER_ID,
+  OPENAI_CODEX_TRANSPORT_PROVIDER_ID,
+  OPENAI_PROVIDER_ID,
   openAIProviderUsesCodexRuntimeByDefault,
   resolveContextConfigProviderForRuntime,
   resolveOpenAIRuntimeProvider,
@@ -11,6 +14,11 @@ import {
 } from "./openai-routing.js";
 
 describe("OpenAI runtime routing policy", () => {
+  it("keeps the exported Codex provider alias canonical while transport remains legacy", () => {
+    expect(OPENAI_CODEX_PROVIDER_ID).toBe(OPENAI_PROVIDER_ID);
+    expect(OPENAI_CODEX_TRANSPORT_PROVIDER_ID).toBe("openai-codex");
+  });
+
   it("uses Codex by default for official OpenAI agent model selections", () => {
     expect(openAIProviderUsesCodexRuntimeByDefault({ provider: "openai" })).toBe(true);
     expect(
@@ -215,24 +223,51 @@ describe("OpenAI runtime routing policy", () => {
         config,
       }),
     ).toBe("openai");
+    expect(
+      listOpenAIAuthProfileProvidersForAgentRuntime({
+        provider: "openai",
+        harnessRuntime: "codex",
+        config,
+      }),
+    ).toEqual(["openai"]);
+    expect(
+      resolveSelectedOpenAIRuntimeProvider({
+        provider: "openai",
+        harnessRuntime: "codex",
+        config,
+      }),
+    ).toBe("openai");
+    expect(
+      resolveOpenAIRuntimeProvider({
+        provider: "openai",
+        harnessRuntime: "codex",
+        config,
+      }),
+    ).toBe("openai");
   });
 
-  it("validates Codex harness auth through the unified OpenAI provider contract", () => {
+  it("validates Codex harness auth through the Codex OAuth provider before OpenAI aliases", () => {
     expect(
       listOpenAIAuthProfileProvidersForAgentRuntime({
         provider: "openai",
         harnessRuntime: "codex",
       }),
-    ).toEqual(["openai"]);
+    ).toEqual(["openai-codex", "openai"]);
   });
 
-  it("keeps OpenAI as the runtime provider when harness runtime is codex", () => {
+  it("uses the Codex transport provider when harness runtime is codex", () => {
     expect(
       resolveSelectedOpenAIRuntimeProvider({
         provider: "openai",
         harnessRuntime: "codex",
       }),
-    ).toBe("openai");
+    ).toBe("openai-codex");
+    expect(
+      resolveOpenAIRuntimeProvider({
+        provider: "openai",
+        harnessRuntime: "codex",
+      }),
+    ).toBe("openai-codex");
   });
 
   it("does not route non-OpenAI providers when runtime is codex", () => {

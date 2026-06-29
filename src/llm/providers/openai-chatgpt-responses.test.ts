@@ -140,8 +140,10 @@ describe("streamOpenAICodexResponses transport", () => {
       throw new Error("fetch should not run");
     });
     vi.stubGlobal("fetch", fetchMock);
+    let capturedHeaders: Record<string, string> | undefined;
     class FailingWebSocket {
-      constructor() {
+      constructor(_url: string, options?: { headers?: Record<string, string> }) {
+        capturedHeaders = options?.headers;
         throw new Error("websocket connect failed");
       }
       send(): void {}
@@ -164,6 +166,9 @@ describe("streamOpenAICodexResponses transport", () => {
     const result = await stream.result();
 
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(capturedHeaders?.["session-id"]).toBe("session-explicit-websocket");
+    expect(capturedHeaders).not.toHaveProperty("session_id");
+    expect(capturedHeaders?.["x-client-request-id"]).toBe("session-explicit-websocket");
     expect(result.stopReason).toBe("error");
     expect(result.errorMessage).toContain("websocket connect failed");
   });
@@ -572,6 +577,41 @@ describe("streamOpenAICodexResponses transport", () => {
     await stream.result();
 
     expect(payload).toMatchObject({ prompt_cache_key: "stable-cache-key" });
+  });
+
+  it("uses Codex-compatible session headers for SSE request affinity", async () => {
+    let capturedHeaders: Headers | undefined;
+    let capturedPayload: Record<string, unknown> | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        capturedHeaders = init?.headers instanceof Headers ? init.headers : undefined;
+        capturedPayload =
+          typeof init?.body === "string"
+            ? (JSON.parse(init.body) as Record<string, unknown>)
+            : undefined;
+        return new Response("usage limit: request shape captured", { status: 400 });
+      }),
+    );
+
+    const stream = streamOpenAICodexResponses(model, context, {
+      apiKey: createJwt({
+        "https://api.openai.com/auth": {
+          chatgpt_account_id: "acct-1",
+        },
+      }),
+      sessionId: "run-session",
+      transport: "sse",
+    });
+
+    const result = await stream.result();
+
+    expect(result.stopReason).toBe("error");
+    expect(capturedHeaders?.get("session-id")).toBe("run-session");
+    expect(capturedHeaders?.has("session_id")).toBe(false);
+    expect(capturedHeaders?.get("x-client-request-id")).toBe("run-session");
+    expect(capturedPayload?.prompt_cache_key).toBe("run-session");
+    expect(capturedPayload).not.toHaveProperty("max_output_tokens");
   });
 
   it.each(["1.5", "0x10"])(

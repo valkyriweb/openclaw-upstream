@@ -70,7 +70,7 @@ const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
 const RETRY_AFTER_HTTP_DATE_RE =
   /^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT|(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), \d{2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2} \d{2}:\d{2}:\d{2} GMT|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ \d]\d \d{2}:\d{2}:\d{2} \d{4})$/;
-const CODEX_TOOL_CALL_PROVIDERS = new Set(["openai", "opencode"]);
+const CODEX_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 const WEBSOCKET_MESSAGE_TOO_BIG_CLOSE_CODE = 1009;
 const OPENAI_CHATGPT_RESPONSES_ERROR_BODY_MAX_BYTES = 16 * 1024;
 const OPENAI_CHATGPT_RESPONSES_SUCCESS_BODY_MAX_BYTES = 16 * 1024 * 1024;
@@ -1697,7 +1697,8 @@ function buildSSEHeaders(
   headers.set("content-type", "application/json");
 
   if (sessionId) {
-    headers.set("session_id", sessionId);
+    // ISSUE-143: ChatGPT Codex rejects the legacy underscored session_id header.
+    headers.set("session-id", sessionId);
     headers.set("x-client-request-id", sessionId);
   }
 
@@ -1718,7 +1719,8 @@ function buildWebSocketHeaders(
   headers.delete("openai-beta");
   headers.set("OpenAI-Beta", OPENAI_BETA_RESPONSES_WEBSOCKETS);
   headers.set("x-client-request-id", requestId);
-  headers.set("session_id", requestId);
+  // ISSUE-143: ChatGPT Codex rejects the legacy underscored session_id header.
+  headers.set("session-id", requestId);
   return headers;
 }
 
