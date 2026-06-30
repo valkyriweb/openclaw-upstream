@@ -625,7 +625,7 @@ describe("streamOpenAICodexResponses transport", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: Parameters<typeof fetch>[0]) => {
-        capturedUrl = String(input);
+        capturedUrl = input instanceof Request ? input.url : input.toString();
         return new Response("usage limit: url captured", { status: 400 });
       }),
     );
