@@ -47,7 +47,6 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { PiHarnessConfig } from "./config.js";
 
 /** One resolved OpenClaw tool, matching PiHarnessConfig["adaptorTools"][number]. */
 export type AdaptorToolSpec = {
@@ -56,6 +55,10 @@ export type AdaptorToolSpec = {
   tool: string;
   description?: string;
   inputSchema?: Record<string, unknown>;
+};
+
+type AdaptorCatalogConfig = {
+  adaptorTools?: AdaptorToolSpec[];
 };
 
 export type McpServerSpec = {
@@ -81,7 +84,9 @@ function findOpenClawAppRoot(startDir: string): string | undefined {
     const pkgPath = join(cursor, "package.json");
     if (existsSync(pkgPath)) {
       try {
-        const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { name?: string };
+        const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
+          name?: string;
+        };
         if (pkg.name === "openclaw") {
           return cursor;
         }
@@ -154,10 +159,15 @@ export async function listToolsFromServer(server: McpServerSpec): Promise<Adapto
     env: process.env as Record<string, string>,
     stderr: "ignore",
   });
-  const client = new Client({ name: "openclaw-pi-fork-adaptor-catalog", version: "1.0.0" });
+  const client = new Client({
+    name: "openclaw-pi-fork-adaptor-catalog",
+    version: "1.0.0",
+  });
   try {
     await client.connect(transport, { timeout: CATALOG_QUERY_TIMEOUT_MS });
-    const { tools } = await client.listTools(undefined, { timeout: CATALOG_QUERY_TIMEOUT_MS });
+    const { tools } = await client.listTools(undefined, {
+      timeout: CATALOG_QUERY_TIMEOUT_MS,
+    });
     return tools
       .filter((tool) => !EXCLUDED_TOOL_NAMES.has(tool.name))
       .map((tool) => ({
@@ -186,7 +196,7 @@ export async function listToolsFromServer(server: McpServerSpec): Promise<Adapto
  * flattens the results.
  */
 export async function resolveAdaptorToolsCatalog(
-  config: PiHarnessConfig,
+  config: AdaptorCatalogConfig,
 ): Promise<AdaptorToolSpec[]> {
   if (Array.isArray(config.adaptorTools) && config.adaptorTools.length > 0) {
     return config.adaptorTools;

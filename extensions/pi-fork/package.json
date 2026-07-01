@@ -20,10 +20,10 @@
     }
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.29.0",
-    "openclaw": "workspace:*"
+    "@modelcontextprotocol/sdk": "1.29.0"
   },
   "devDependencies": {
-    "@openclaw/plugin-sdk": "workspace:*"
+    "@openclaw/plugin-sdk": "workspace:*",
+    "openclaw": "workspace:*"
   }
 }

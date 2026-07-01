@@ -10,12 +10,8 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
-import {
-  resolveAdaptorMcpServerEntries,
-  resolveAdaptorToolsCatalog,
-  type McpServerSpec,
-} from "./adaptor-catalog.js";
-import type { PiHarnessConfig } from "./config.js";
+import { resolveAdaptorMcpServerEntries, resolveAdaptorToolsCatalog } from "./adaptor-catalog.js";
+import type { PiHarnessConfig } from "./config-types.js";
 
 type OpenClawAuthProfile = {
   type?: string;
@@ -169,7 +165,9 @@ function syncOpenAiCodexAuth(config: PiHarnessConfig): void {
     email: profile.email,
   };
   mkdirSync(dirname(targetPath), { recursive: true });
-  writeFileSync(targetPath, JSON.stringify(existing, null, 2) + "\n", { mode: 0o600 });
+  writeFileSync(targetPath, JSON.stringify(existing, null, 2) + "\n", {
+    mode: 0o600,
+  });
 }
 
 /**
@@ -292,7 +290,7 @@ export async function ensurePiHarnessAgentSettings(config: PiHarnessConfig): Pro
  */
 export function ensureAdaptorMcpServers(
   workspaceDir: string,
-  entries: Record<string, McpServerSpec> = resolveAdaptorMcpServerEntries(),
+  entries: ReturnType<typeof resolveAdaptorMcpServerEntries> = resolveAdaptorMcpServerEntries(),
 ): boolean {
   const newEntries = entries;
   if (Object.keys(newEntries).length === 0) {
