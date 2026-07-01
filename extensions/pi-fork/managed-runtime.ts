@@ -10,7 +10,11 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
-import { resolveAdaptorMcpServerEntries, resolveAdaptorToolsCatalog } from "./adaptor-catalog.js";
+import {
+  resolveAdaptorMcpServerEntries,
+  resolveAdaptorToolsCatalog,
+  type McpServerSpec,
+} from "./adaptor-catalog.js";
 import type { PiHarnessConfig } from "./config.js";
 
 type OpenClawAuthProfile = {
@@ -281,14 +285,18 @@ export async function ensurePiHarnessAgentSettings(config: PiHarnessConfig): Pro
  * <workspaceDir>/config/mcporter.json without disturbing any existing
  * hand-configured servers (horizon, google-ads, canva, qmd, ...). No-ops
  * when neither adaptor MCP server script is deployed in this image yet
- * (resolveAdaptorMcpServerEntries returns {}), and never throws on a
- * malformed existing file — a parse hiccup must never destroy a
- * hand-maintained mcporter.json.
+ * (resolveAdaptorMcpServerEntries returns {}). Returns false instead of
+ * mutating on a malformed existing file — a parse hiccup must never destroy a
+ * hand-maintained mcporter.json, but the caller must also avoid exposing
+ * bridged tools whose backing mcporter servers were not installed.
  */
-export function ensureAdaptorMcpServers(workspaceDir: string): void {
-  const newEntries = resolveAdaptorMcpServerEntries();
+export function ensureAdaptorMcpServers(
+  workspaceDir: string,
+  entries: Record<string, McpServerSpec> = resolveAdaptorMcpServerEntries(),
+): boolean {
+  const newEntries = entries;
   if (Object.keys(newEntries).length === 0) {
-    return;
+    return true;
   }
   const mcporterPath = join(workspaceDir, "config", "mcporter.json");
   let existing: Record<string, unknown> = {};
@@ -296,7 +304,7 @@ export function ensureAdaptorMcpServers(workspaceDir: string): void {
     try {
       existing = JSON.parse(readFileSync(mcporterPath, "utf8")) as Record<string, unknown>;
     } catch {
-      return;
+      return false;
     }
   }
   const existingServers =
@@ -310,6 +318,7 @@ export function ensureAdaptorMcpServers(workspaceDir: string): void {
       "\n",
     { mode: 0o600 },
   );
+  return true;
 }
 
 function replaceOnce(text: string, target: string, replacement: string): string {

@@ -1,8 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ensurePiHarnessAgentSettings, ensureTokenjuicePiExtension } from "./managed-runtime.js";
+import {
+  ensureAdaptorMcpServers,
+  ensurePiHarnessAgentSettings,
+  ensureTokenjuicePiExtension,
+} from "./managed-runtime.js";
 
 describe("ensureTokenjuicePiExtension", () => {
   const tempDirs: string[] = [];
@@ -131,6 +135,77 @@ describe("ensurePiHarnessAgentSettings", () => {
     expect(JSON.parse(readFileSync(settingsPath, "utf8"))).toMatchObject({
       defaultThinkingLevel: "adaptive",
     });
+  });
+});
+
+describe("ensureAdaptorMcpServers", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("merges bridge MCP servers without clobbering existing workspace servers", () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "openclaw-workspace-"));
+    tempDirs.push(workspaceDir);
+    mkdirSync(join(workspaceDir, "config"), { recursive: true });
+    writeFileSync(
+      join(workspaceDir, "config", "mcporter.json"),
+      JSON.stringify(
+        {
+          mcpServers: {
+            qmd: { command: "node", args: ["qmd.js"] },
+          },
+          imports: [],
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+
+    const ok = ensureAdaptorMcpServers(workspaceDir, {
+      "openclaw-tools": {
+        command: process.execPath,
+        args: ["openclaw-tools-serve.js"],
+        cwd: "/app",
+      },
+    });
+
+    expect(ok).toBe(true);
+    expect(JSON.parse(readFileSync(join(workspaceDir, "config", "mcporter.json"), "utf8"))).toEqual(
+      {
+        mcpServers: {
+          qmd: { command: "node", args: ["qmd.js"] },
+          "openclaw-tools": {
+            command: process.execPath,
+            args: ["openclaw-tools-serve.js"],
+            cwd: "/app",
+          },
+        },
+        imports: [],
+      },
+    );
+  });
+
+  it("refuses to mutate malformed mcporter.json so callers can avoid exposing unbacked tools", () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "openclaw-workspace-"));
+    tempDirs.push(workspaceDir);
+    const mcporterPath = join(workspaceDir, "config", "mcporter.json");
+    mkdirSync(join(workspaceDir, "config"), { recursive: true });
+    writeFileSync(mcporterPath, "{not-json\n");
+
+    const ok = ensureAdaptorMcpServers(workspaceDir, {
+      "openclaw-tools": {
+        command: process.execPath,
+        args: ["openclaw-tools-serve.js"],
+        cwd: "/app",
+      },
+    });
+
+    expect(ok).toBe(false);
+    expect(readFileSync(mcporterPath, "utf8")).toBe("{not-json\n");
   });
 });
 

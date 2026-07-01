@@ -34,8 +34,12 @@ async function resolvePiAgentEnv(
   config: PiHarnessConfig,
   workspaceDir: string,
 ): Promise<NodeJS.ProcessEnv> {
+  if (!ensureAdaptorMcpServers(workspaceDir)) {
+    throw new Error(
+      "pi-fork OpenClaw tool bridge setup failed: workspace config/mcporter.json is malformed",
+    );
+  }
   await ensurePiHarnessAgentSettings(config);
-  ensureAdaptorMcpServers(workspaceDir);
   return {
     ...process.env,
     PI_CODING_AGENT_DIR: resolvePiAgentDir(config),
