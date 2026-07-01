@@ -40,13 +40,13 @@ describe("ensurePiHarnessAgentSettings", () => {
     }
   });
 
-  it("writes a managed Pi settings file that pins the headless harness package", () => {
+  it("writes a managed Pi settings file that pins the headless harness package", async () => {
     const piAgentDir = mkdtempSync(join(tmpdir(), "openclaw-pi-agent-"));
     const packageDir = mkdtempSync(join(tmpdir(), "my-pi-harness-"));
     tempDirs.push(piAgentDir, packageDir);
     mkdirSync(join(packageDir, "src"), { recursive: true });
 
-    const settingsPath = ensurePiHarnessAgentSettings({
+    const settingsPath = await ensurePiHarnessAgentSettings({
       piAgentDir,
       myPiHarnessPackagePath: packageDir,
     });
@@ -84,13 +84,13 @@ describe("ensurePiHarnessAgentSettings", () => {
     });
   });
 
-  it("honors configured native-tool eager overrides for profile-specific tool visibility", () => {
+  it("honors configured native-tool eager overrides for profile-specific tool visibility", async () => {
     const piAgentDir = mkdtempSync(join(tmpdir(), "openclaw-pi-agent-"));
     const packageDir = mkdtempSync(join(tmpdir(), "my-pi-harness-"));
     tempDirs.push(piAgentDir, packageDir);
     mkdirSync(join(packageDir, "src"), { recursive: true });
 
-    const settingsPath = ensurePiHarnessAgentSettings({
+    const settingsPath = await ensurePiHarnessAgentSettings({
       piAgentDir,
       myPiHarnessPackagePath: packageDir,
       nativeToolEager: [],
@@ -106,13 +106,13 @@ describe("ensurePiHarnessAgentSettings", () => {
     ).toBeUndefined();
   });
 
-  it("honors a configured defaultThinkingLevel (ISSUE-140: adaptive-only models reject thinking disabled)", () => {
+  it("honors a configured defaultThinkingLevel (ISSUE-140: adaptive-only models reject thinking disabled)", async () => {
     const piAgentDir = mkdtempSync(join(tmpdir(), "openclaw-pi-agent-"));
     const packageDir = mkdtempSync(join(tmpdir(), "my-pi-harness-"));
     tempDirs.push(piAgentDir, packageDir);
     mkdirSync(join(packageDir, "src"), { recursive: true });
 
-    const settingsPath = ensurePiHarnessAgentSettings({
+    const settingsPath = await ensurePiHarnessAgentSettings({
       piAgentDir,
       myPiHarnessPackagePath: packageDir,
       defaultThinkingLevel: "adaptive",

@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
+import { resolveAdaptorMcpServerEntries, resolveAdaptorToolsCatalog } from "./adaptor-catalog.js";
 import type { PiHarnessConfig } from "./config.js";
 
 type OpenClawAuthProfile = {
@@ -168,13 +169,20 @@ function syncOpenAiCodexAuth(config: PiHarnessConfig): void {
 }
 
 /**
- * Static, cache-stable config object for my-pi extensions in the spawned pi.
+ * Cache-stable config object for my-pi extensions in the spawned pi.
  *
- * OpenClaw owns these catalogs in-process, so it serializes them synchronously
- * into settings.json at spawn (no async tools/list handshake, deterministic
- * lex-sorted ordering). Read by native-tool-overrides + openclaw-adaptor.
+ * adaptorTools is either an explicit config override (serialized verbatim,
+ * synchronously equivalent to the old behavior) or live-resolved by querying
+ * OpenClaw's own MCP tool-bridge servers (ISSUE-165) — see
+ * resolveAdaptorToolsCatalog in adaptor-catalog.ts. Either way the result is
+ * filtered and lex-sorted here before being written, so settings.json (and
+ * therefore pi's tools[] and cached system prompt) stays byte-stable across
+ * spawns even though the live-query path can return tools in a
+ * non-deterministic order. Read by native-tool-overrides + openclaw-adaptor.
  */
-function buildPiHarnessExtensionSettings(config: PiHarnessConfig): Record<string, unknown> {
+async function buildPiHarnessExtensionSettings(
+  config: PiHarnessConfig,
+): Promise<Record<string, unknown>> {
   const exclude = config.nativeToolExclude ?? ["Agent"];
   const eager = config.nativeToolEager ?? ["TaskBackgroundList", "TaskStop"];
   const settings: Record<string, unknown> = {
@@ -184,18 +192,17 @@ function buildPiHarnessExtensionSettings(config: PiHarnessConfig): Record<string
     },
   };
 
-  const tools = Array.isArray(config.adaptorTools)
-    ? config.adaptorTools
-        .filter(
-          (t) =>
-            t &&
-            typeof t.name === "string" &&
-            typeof t.server === "string" &&
-            typeof t.tool === "string",
-        )
-        .slice()
-        .sort((a, b) => a.name.localeCompare(b.name))
-    : [];
+  const resolvedTools = await resolveAdaptorToolsCatalog(config);
+  const tools = resolvedTools
+    .filter(
+      (t) =>
+        t &&
+        typeof t.name === "string" &&
+        typeof t.server === "string" &&
+        typeof t.tool === "string",
+    )
+    .slice()
+    .toSorted((a, b) => a.name.localeCompare(b.name));
   if (tools.length > 0) {
     settings["openclaw-adaptor"] = {
       tools,
@@ -226,7 +233,7 @@ export function resolveMyPiHarnessPackage(config: PiHarnessConfig): string | und
   return existsSync(DEFAULT_MY_PI_HARNESS_PACKAGE) ? DEFAULT_MY_PI_HARNESS_PACKAGE : undefined;
 }
 
-export function ensurePiHarnessAgentSettings(config: PiHarnessConfig): string {
+export async function ensurePiHarnessAgentSettings(config: PiHarnessConfig): Promise<string> {
   const agentDir = resolvePiAgentDir(config);
   const packagePath = resolveMyPiHarnessPackage(config);
   if (!packagePath) {
@@ -245,7 +252,7 @@ export function ensurePiHarnessAgentSettings(config: PiHarnessConfig): string {
         defaultThinkingLevel: config.defaultThinkingLevel ?? "off",
         enabledModels: ["claude-bridge/*", "openai-codex/*", "openai/*"],
         packages: [packagePath],
-        extensions: buildPiHarnessExtensionSettings(config),
+        extensions: await buildPiHarnessExtensionSettings(config),
       },
       null,
       2,
@@ -267,6 +274,42 @@ export function ensurePiHarnessAgentSettings(config: PiHarnessConfig): string {
     });
   }
   return settingsPath;
+}
+
+/**
+ * Merges this image's bridged-tool MCP stdio server entries (ISSUE-165) into
+ * <workspaceDir>/config/mcporter.json without disturbing any existing
+ * hand-configured servers (horizon, google-ads, canva, qmd, ...). No-ops
+ * when neither adaptor MCP server script is deployed in this image yet
+ * (resolveAdaptorMcpServerEntries returns {}), and never throws on a
+ * malformed existing file — a parse hiccup must never destroy a
+ * hand-maintained mcporter.json.
+ */
+export function ensureAdaptorMcpServers(workspaceDir: string): void {
+  const newEntries = resolveAdaptorMcpServerEntries();
+  if (Object.keys(newEntries).length === 0) {
+    return;
+  }
+  const mcporterPath = join(workspaceDir, "config", "mcporter.json");
+  let existing: Record<string, unknown> = {};
+  if (existsSync(mcporterPath)) {
+    try {
+      existing = JSON.parse(readFileSync(mcporterPath, "utf8")) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+  }
+  const existingServers =
+    existing.mcpServers && typeof existing.mcpServers === "object"
+      ? (existing.mcpServers as Record<string, unknown>)
+      : {};
+  mkdirSync(dirname(mcporterPath), { recursive: true });
+  writeFileSync(
+    mcporterPath,
+    JSON.stringify({ ...existing, mcpServers: { ...existingServers, ...newEntries } }, null, 2) +
+      "\n",
+    { mode: 0o600 },
+  );
 }
 
 function replaceOnce(text: string, target: string, replacement: string): string {

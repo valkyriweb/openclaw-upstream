@@ -10,7 +10,11 @@ import crypto from "node:crypto";
 import { embeddedAgentLog } from "openclaw/plugin-sdk/agent-harness-runtime";
 import type { PiHarnessConfig } from "./config.js";
 import { resolvePiCommand } from "./config.js";
-import { ensurePiHarnessAgentSettings, resolvePiAgentDir } from "./managed-runtime.js";
+import {
+  ensureAdaptorMcpServers,
+  ensurePiHarnessAgentSettings,
+  resolvePiAgentDir,
+} from "./managed-runtime.js";
 
 const STDERR_TAIL_MAX_LINES = 50;
 const STDERR_TAIL_MAX_LINE_CHARS = 500;
@@ -26,8 +30,12 @@ const DEFAULT_CODEX_DOWNSTREAM_MODELS = new Set([
   "gpt-5.2",
 ]);
 
-function resolvePiAgentEnv(config: PiHarnessConfig): NodeJS.ProcessEnv {
-  ensurePiHarnessAgentSettings(config);
+async function resolvePiAgentEnv(
+  config: PiHarnessConfig,
+  workspaceDir: string,
+): Promise<NodeJS.ProcessEnv> {
+  await ensurePiHarnessAgentSettings(config);
+  ensureAdaptorMcpServers(workspaceDir);
   return {
     ...process.env,
     PI_CODING_AGENT_DIR: resolvePiAgentDir(config),
@@ -82,6 +90,14 @@ type PiRpcResponse = {
 };
 
 const bindings = new Map<string, PiRpcProcess>();
+// Single-flight guard: getOrCreatePiProcess now awaits resolvePiAgentEnv
+// (live tool-catalog query, ISSUE-165) before it registers a binding, which
+// opened a real race — a concurrent caller for the same session (e.g. a
+// poll loop racing the call that triggered the spawn) used to see no binding
+// yet and would spawn a second, duplicate pi process. Reserve the session's
+// slot with this in-flight promise synchronously, before any await, so every
+// concurrent caller converges on the same spawn.
+const pendingCreations = new Map<string, Promise<PiRpcProcess>>();
 
 export function buildPiRpcArgv(opts: {
   prefixArgs: string[];
@@ -267,102 +283,126 @@ export async function getOrCreatePiProcess(
     clearPiProcess(openclaSessionId);
   }
 
-  // Build argv
-  const { bin, prefixArgs } = resolvePiCommand(opts.config);
-  const argv = buildPiRpcArgv({
-    prefixArgs,
-    extraArgs: opts.config.args,
-    config: opts.config,
-    modelId: opts.modelId,
-    provider: opts.provider,
-    workspaceDir: opts.workspaceDir,
-  });
-
-  const proc = spawn(bin, argv, {
-    stdio: ["pipe", "pipe", "pipe"],
-    env: resolvePiAgentEnv(opts.config),
-    cwd: requestedWorkspaceDir,
-  });
-
-  const listeners: Set<(event: Record<string, unknown>) => void> = new Set();
-  const onClose: Set<() => void> = new Set();
-  let closed = false;
-  let binding: PiRpcProcess;
-
-  const notifyClose = () => {
-    if (closed) {
-      return;
+  const pendingCreation = pendingCreations.get(openclaSessionId);
+  if (pendingCreation) {
+    const resolved = await pendingCreation;
+    if (
+      resolved.requestedModelId === opts.modelId &&
+      resolved.requestedProvider === requestedProvider &&
+      resolved.requestedWorkspaceDir === requestedWorkspaceDir
+    ) {
+      return resolved;
     }
-    closed = true;
-    if (bindings.get(openclaSessionId) === binding) {
-      bindings.delete(openclaSessionId);
-    }
-    for (const handler of onClose) {
+    // A genuinely different request (model/provider/workspace) raced the
+    // pending one — re-evaluate now that it has settled and the pending-map
+    // entry below has been cleared.
+    return getOrCreatePiProcess(openclaSessionId, opts);
+  }
+
+  const creation = (async (): Promise<PiRpcProcess> => {
+    // Build argv
+    const { bin, prefixArgs } = resolvePiCommand(opts.config);
+    const argv = buildPiRpcArgv({
+      prefixArgs,
+      extraArgs: opts.config.args,
+      config: opts.config,
+      modelId: opts.modelId,
+      provider: opts.provider,
+      workspaceDir: opts.workspaceDir,
+    });
+
+    const proc = spawn(bin, argv, {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: await resolvePiAgentEnv(opts.config, requestedWorkspaceDir),
+      cwd: requestedWorkspaceDir,
+    });
+
+    const listeners: Set<(event: Record<string, unknown>) => void> = new Set();
+    const onClose: Set<() => void> = new Set();
+    let closed = false;
+
+    const notifyClose = () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      if (bindings.get(openclaSessionId) === binding) {
+        bindings.delete(openclaSessionId);
+      }
+      for (const handler of onClose) {
+        try {
+          handler();
+        } catch {}
+      }
+    };
+
+    const send: PiRpcSendFn = (obj) => {
+      if (!proc.stdin || proc.stdin.destroyed) {
+        embeddedAgentLog.warn("pi-fork rpc send skipped: stdin unavailable", {
+          sessionId: openclaSessionId,
+          commandType: (obj as { type?: unknown })?.type,
+        });
+        return;
+      }
       try {
-        handler();
-      } catch {}
-    }
-  };
+        proc.stdin.write(JSON.stringify(obj) + "\n");
+      } catch (err) {
+        // EPIPE and friends: pi died between the destroyed check and the write.
+        embeddedAgentLog.warn("pi-fork rpc send failed", {
+          sessionId: openclaSessionId,
+          commandType: (obj as { type?: unknown })?.type,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
 
-  const send: PiRpcSendFn = (obj) => {
-    if (!proc.stdin || proc.stdin.destroyed) {
-      embeddedAgentLog.warn("pi-fork rpc send skipped: stdin unavailable", {
-        sessionId: openclaSessionId,
-        commandType: (obj as { type?: unknown })?.type,
-      });
-      return;
+    const stderrTail: string[] = [];
+    if (proc.stdout) {
+      bindPiRpcJsonlStdout(proc.stdout, listeners, { sessionId: openclaSessionId });
+      proc.stdout.on("close", notifyClose);
     }
-    try {
-      proc.stdin.write(JSON.stringify(obj) + "\n");
-    } catch (err) {
-      // EPIPE and friends: pi died between the destroyed check and the write.
-      embeddedAgentLog.warn("pi-fork rpc send failed", {
+
+    proc.on("error", () => {
+      notifyClose();
+    });
+
+    if (proc.stderr) {
+      bindPiStderrTail(proc.stderr, stderrTail);
+    }
+    // Swallow async stdin errors (EPIPE after pi exit) so they cannot become
+    // uncaught stream exceptions in the gateway process.
+    proc.stdin?.on("error", (err) => {
+      embeddedAgentLog.warn("pi-fork rpc stdin stream error", {
         sessionId: openclaSessionId,
-        commandType: (obj as { type?: unknown })?.type,
         error: err instanceof Error ? err.message : String(err),
       });
-    }
-  };
-
-  const stderrTail: string[] = [];
-  if (proc.stdout) {
-    bindPiRpcJsonlStdout(proc.stdout, listeners, { sessionId: openclaSessionId });
-    proc.stdout.on("close", notifyClose);
-  }
-
-  proc.on("error", () => {
-    notifyClose();
-  });
-
-  if (proc.stderr) {
-    bindPiStderrTail(proc.stderr, stderrTail);
-  }
-  // Swallow async stdin errors (EPIPE after pi exit) so they cannot become
-  // uncaught stream exceptions in the gateway process.
-  proc.stdin?.on("error", (err) => {
-    embeddedAgentLog.warn("pi-fork rpc stdin stream error", {
-      sessionId: openclaSessionId,
-      error: err instanceof Error ? err.message : String(err),
     });
-  });
 
-  // Read the pi session ID once it starts (pi emits state on startup via get_state)
-  // We'll query it after spawn
-  binding = {
-    proc,
-    send,
-    sessionId: openclaSessionId,
-    requestedModelId: opts.modelId,
-    requestedProvider,
-    requestedWorkspaceDir,
-    listeners,
-    onClose,
-    turnActive: false,
-    stderrTail,
-  };
+    // Read the pi session ID once it starts (pi emits state on startup via get_state)
+    // We'll query it after spawn
+    const binding: PiRpcProcess = {
+      proc,
+      send,
+      sessionId: openclaSessionId,
+      requestedModelId: opts.modelId,
+      requestedProvider,
+      requestedWorkspaceDir,
+      listeners,
+      onClose,
+      turnActive: false,
+      stderrTail,
+    };
 
-  bindings.set(openclaSessionId, binding);
-  return binding;
+    bindings.set(openclaSessionId, binding);
+    return binding;
+  })();
+
+  pendingCreations.set(openclaSessionId, creation);
+  try {
+    return await creation;
+  } finally {
+    pendingCreations.delete(openclaSessionId);
+  }
 }
 
 /**
@@ -409,8 +449,6 @@ export async function sendPiRpcCommand(params: {
   const requestId = params.command.id ?? crypto.randomUUID();
 
   return new Promise<PiRpcResponse>((resolve, reject) => {
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-
     const cleanup = () => {
       if (timeout) {
         clearTimeout(timeout);
@@ -444,7 +482,7 @@ export async function sendPiRpcCommand(params: {
     params.piProcess.onClose.add(onClose);
 
     const timeoutMs = params.timeoutMs ?? 10_000;
-    timeout = setTimeout(() => {
+    const timeout = setTimeout(() => {
       cleanup();
       reject(new Error(`Pi RPC ${params.command.type} timed out after ${timeoutMs}ms`));
     }, timeoutMs);
