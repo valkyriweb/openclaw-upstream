@@ -110,8 +110,10 @@ process.stdin.on("data", (chunk) => {
     if (!line) continue;
     const command = JSON.parse(line);
     if (command.type === "prompt") {
-      process.stdout.write(JSON.stringify({ type: "message_update", message: { role: "assistant", content: "fallback text" } }) + "\\n");
-      process.stdout.write(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: "fallback text" }] }) + "\\n");
+      const emittedAt = Date.now();
+      const content = "fallback text " + emittedAt;
+      process.stdout.write(JSON.stringify({ type: "message_update", message: { role: "assistant", content } }) + "\\n");
+      process.stdout.write(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content }] }) + "\\n");
       continue;
     }
     if (command.type === "get_last_assistant_text" || command.type === "get_messages") {
@@ -123,7 +125,6 @@ setInterval(() => {}, 1000);
 `,
     );
     const sessionId = "final-state-failure-test";
-    const startedAt = Date.now();
 
     try {
       const result = (await runPiRpcAttempt({ sessionId, prompt: "hello" } as never, {
@@ -132,8 +133,16 @@ setInterval(() => {}, 1000);
         myPiHarnessPackagePath: packageDir,
       })) as { lastAssistant: { content: Array<{ text: string }> } };
 
-      expect(result.lastAssistant.content[0]?.text).toBe("fallback text");
-      expect(Date.now() - startedAt).toBeLessThan(1_000);
+      const text = result.lastAssistant.content[0]?.text ?? "";
+      const match = text.match(/^fallback text (\d+)$/u);
+      expect(match).not.toBeNull();
+      const emittedAt = Number(match?.[1]);
+      // The behavior under test is the final-state query path after the turn
+      // has streamed/ended. Do not include pi process setup in this budget:
+      // ISSUE-165 now legitimately resolves a live OpenClaw MCP catalog before
+      // spawn, and that setup cost is unrelated to whether failed optional
+      // get_last_assistant_text/get_messages RPCs wait for the 5s fallback.
+      expect(Date.now() - emittedAt).toBeLessThan(1_000);
     } finally {
       clearPiProcess(sessionId);
     }
