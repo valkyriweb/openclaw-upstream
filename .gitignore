@@ -270,3 +270,10 @@ extensions/diffs-language-pack/assets/viewer-runtime.js
 /.opengrep-out/
 /.crabbox-artifacts
 .comux*
+
+# Runtime-mutated gateway workspace file (ISSUE-165 ensureAdaptorMcpServers).
+# In production this lives under the gateway's own workspaceDir, never this
+# checkout; it only appears here as a side effect of running tests/scripts
+# locally with workspaceDir left at its process.cwd() default after dist/mcp
+# has been built. Never a file to track.
+/config/mcporter.json

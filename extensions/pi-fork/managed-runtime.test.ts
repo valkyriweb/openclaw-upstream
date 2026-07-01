@@ -46,9 +46,16 @@ describe("ensurePiHarnessAgentSettings", () => {
     tempDirs.push(piAgentDir, packageDir);
     mkdirSync(join(packageDir, "src"), { recursive: true });
 
+    // Pins an explicit adaptorTools override so this schema-regression test
+    // stays fully deterministic regardless of whether dist/mcp/*.js happens
+    // to be built on the machine running it — resolveAdaptorToolsCatalog
+    // returns config.adaptorTools verbatim when it's non-empty, bypassing
+    // live MCP resolution entirely (that live-query path is covered in
+    // adaptor-catalog.test.ts instead).
     const settingsPath = await ensurePiHarnessAgentSettings({
       piAgentDir,
       myPiHarnessPackagePath: packageDir,
+      adaptorTools: [{ name: "oc__manual__x", server: "manual", tool: "x" }],
     });
 
     expect(settingsPath).toBe(join(piAgentDir, "settings.json"));
@@ -62,6 +69,9 @@ describe("ensurePiHarnessAgentSettings", () => {
         "native-tool-overrides": {
           exclude: ["Agent"],
           eager: ["TaskBackgroundList", "TaskStop"],
+        },
+        "openclaw-adaptor": {
+          tools: [{ name: "oc__manual__x", server: "manual", tool: "x" }],
         },
       },
     });
