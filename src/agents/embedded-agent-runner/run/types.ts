@@ -63,6 +63,8 @@ export type EmbeddedRunAttemptParams = EmbeddedRunAttemptBase & {
   contextWindowInfo?: EmbeddedRunContextWindowInfo;
   /** Resolved API key for this run when runtime auth did not replace it. */
   resolvedApiKey?: string;
+  /** Global command lane for this attempt; defaults to the shared main lane when omitted. */
+  lane?: string;
   /** Auth profile resolved for this attempt's provider/model call. */
   authProfileId?: string;
   /** Source for the resolved auth profile (user-locked or automatic). */
