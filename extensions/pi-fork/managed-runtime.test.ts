@@ -3,10 +3,74 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  bridgeOpenClawProviders,
   ensureAdaptorMcpServers,
   ensurePiHarnessAgentSettings,
   ensureTokenjuicePiExtension,
 } from "./managed-runtime.js";
+
+describe("bridgeOpenClawProviders", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function writeConfig(models: unknown): string {
+    const dir = mkdtempSync(join(tmpdir(), "openclaw-config-"));
+    tempDirs.push(dir);
+    const path = join(dir, "openclaw.json");
+    writeFileSync(path, JSON.stringify({ models }));
+    return path;
+  }
+
+  const clawrouter = {
+    baseUrl: "http://clawrouter.clawrouter.svc.cluster.local:8789",
+    api: "anthropic-messages",
+    apiKey: "clawrouter-live-token",
+    models: [{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (ClawRouter)" }],
+  };
+
+  it("bridges an apiKey provider on a pi-speakable transport (clawrouter)", () => {
+    const path = writeConfig({ providers: { clawrouter } });
+    const bridged = bridgeOpenClawProviders(path);
+    expect(bridged).toEqual({ clawrouter });
+  });
+
+  it("never bridges the three DEFAULT_PI_HARNESS_MODELS ids (keeps OAuth authoritative)", () => {
+    const path = writeConfig({
+      providers: {
+        clawrouter,
+        "claude-bridge": { api: "anthropic-messages", apiKey: "x", models: [{ id: "a" }] },
+        "openai-codex": { api: "openai-codex-responses", apiKey: "x", models: [{ id: "b" }] },
+        openai: { api: "openai-codex-responses", apiKey: "x", models: [{ id: "c" }] },
+      },
+    });
+    expect(Object.keys(bridgeOpenClawProviders(path))).toEqual(["clawrouter"]);
+  });
+
+  it("skips OAuth-only (no inline apiKey), unspeakable transports, and empty model lists", () => {
+    const path = writeConfig({
+      providers: {
+        oauthOnly: { api: "anthropic-messages", models: [{ id: "a" }] },
+        weirdApi: { api: "some-bespoke-transport", apiKey: "x", models: [{ id: "b" }] },
+        noModels: { api: "anthropic-messages", apiKey: "x", models: [] },
+      },
+    });
+    expect(bridgeOpenClawProviders(path)).toEqual({});
+  });
+
+  it("fails soft to no bridged providers on missing or malformed config", () => {
+    expect(bridgeOpenClawProviders(join(tmpdir(), "does-not-exist-openclaw.json"))).toEqual({});
+    const dir = mkdtempSync(join(tmpdir(), "openclaw-config-"));
+    tempDirs.push(dir);
+    const bad = join(dir, "openclaw.json");
+    writeFileSync(bad, "{ not valid json ");
+    expect(bridgeOpenClawProviders(bad)).toEqual({});
+  });
+});
 
 describe("ensureTokenjuicePiExtension", () => {
   const tempDirs: string[] = [];

@@ -93,6 +93,82 @@ const DEFAULT_PI_HARNESS_MODELS = {
   },
 };
 const DEFAULT_AUTH_PROFILES_PATH = `${openClawHome}/agents/main/agent/auth-profiles.json`;
+const DEFAULT_OPENCLAW_CONFIG_PATH = `${openClawHome}/openclaw.json`;
+
+// Provider `api` transports the spawned pi runtime can actually speak. OpenClaw
+// providers on other transports (or OAuth-only, i.e. no inline apiKey) are
+// skipped so a bridged entry never yields an unauthenticated / unusable pi
+// provider.
+const PI_BRIDGEABLE_PROVIDER_APIS = new Set([
+  "anthropic-messages",
+  "openai-responses",
+  "openai-completions",
+  "openai-chat-completions",
+  "openai-codex-responses",
+  "google-generative-ai",
+]);
+
+type PiModelsProviderBlock = {
+  api?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  models?: unknown;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Bridges OpenClaw's own `models.providers` (e.g. clawrouter) into the spawned
+ * pi runtime catalog so `pi-fork/<model>` turns can be routed downstream to them
+ * via `plugins.config.pi-fork.downstreamProvidersByModel`. Without this the
+ * spawned pi only knows the three hardcoded DEFAULT_PI_HARNESS_MODELS providers,
+ * so any other downstream (`--provider clawrouter`) is unknown / 401s.
+ *
+ * The plugin only receives `plugins.config.pi-fork`, never the global config, so
+ * we read OPENCLAW_HOME/openclaw.json directly — the same on-disk source
+ * managed-runtime already reads auth-profiles from. Skips the three default ids
+ * (keeps their OAuth semantics authoritative), providers without an inline
+ * apiKey, and transports pi cannot speak. Fails soft: any read/parse error
+ * yields no bridged providers rather than breaking the spawn.
+ */
+export function bridgeOpenClawProviders(
+  configPath: string = DEFAULT_OPENCLAW_CONFIG_PATH,
+): Record<string, PiModelsProviderBlock> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(configPath, "utf8"));
+  } catch {
+    return {};
+  }
+  const providers =
+    isRecord(parsed) && isRecord(parsed.models) && isRecord(parsed.models.providers)
+      ? parsed.models.providers
+      : {};
+  const bridged: Record<string, PiModelsProviderBlock> = {};
+  for (const [id, block] of Object.entries(providers)) {
+    if (id in DEFAULT_PI_HARNESS_MODELS.providers) {
+      continue;
+    }
+    if (!isRecord(block)) {
+      continue;
+    }
+    const { api, apiKey, models } = block;
+    if (typeof api !== "string" || !PI_BRIDGEABLE_PROVIDER_APIS.has(api)) {
+      continue;
+    }
+    if (typeof apiKey !== "string" || apiKey.length === 0) {
+      continue;
+    }
+    if (!Array.isArray(models) || models.length === 0) {
+      continue;
+    }
+    bridged[id] = block as PiModelsProviderBlock;
+  }
+  return bridged;
+}
+
 const localRequire = createRequire(import.meta.url);
 
 function run(command: string, args: string[], cwd?: string): void {
@@ -244,6 +320,16 @@ export async function ensurePiHarnessAgentSettings(config: PiHarnessConfig): Pro
     );
   }
   mkdirSync(agentDir, { recursive: true });
+  // Bridge OpenClaw's own providers (e.g. clawrouter) into the spawned pi so
+  // pi-fork turns can route downstream to them (ISSUE-167). enabledModels is
+  // kept sorted for prompt-cache byte-stability across same-cwd spawns.
+  const bridgedProviders = bridgeOpenClawProviders();
+  const enabledModels = [
+    "claude-bridge/*",
+    "openai-codex/*",
+    "openai/*",
+    ...Object.keys(bridgedProviders).map((id) => `${id}/*`),
+  ].toSorted();
   const settingsPath = join(agentDir, "settings.json");
   writeFileSync(
     settingsPath,
@@ -252,7 +338,7 @@ export async function ensurePiHarnessAgentSettings(config: PiHarnessConfig): Pro
         defaultProvider: "claude-bridge",
         defaultModel: "claude-opus-4-8",
         defaultThinkingLevel: config.defaultThinkingLevel ?? "off",
-        enabledModels: ["claude-bridge/*", "openai-codex/*", "openai/*"],
+        enabledModels,
         packages: [packagePath],
         extensions: await buildPiHarnessExtensionSettings(config),
       },
@@ -269,9 +355,13 @@ export async function ensurePiHarnessAgentSettings(config: PiHarnessConfig): Pro
     }
   } else {
     // Container: the catalog is fully managed — refresh every spawn so model
-    // upgrades and new providers (openai-codex/openai) always propagate instead
-    // of being pinned by a stale only-if-absent write.
-    writeFileSync(targetModelsPath, JSON.stringify(DEFAULT_PI_HARNESS_MODELS, null, 2) + "\n", {
+    // upgrades and new providers (openai-codex/openai + bridged OpenClaw
+    // providers) always propagate instead of being pinned by a stale
+    // only-if-absent write.
+    const managedModels = {
+      providers: { ...bridgedProviders, ...DEFAULT_PI_HARNESS_MODELS.providers },
+    };
+    writeFileSync(targetModelsPath, JSON.stringify(managedModels, null, 2) + "\n", {
       mode: 0o600,
     });
   }
