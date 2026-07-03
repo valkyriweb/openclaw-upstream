@@ -310,6 +310,17 @@ describe("parseCronToolsAllow", () => {
     expect(parseCronToolsAllow(input)).toEqual(expected);
   });
 
+  it("canonicalizes namespaced entries and dedupes at the write boundary (ISSUE-171)", () => {
+    expect(
+      parseCronToolsAllow(
+        "openclaw.web_search, functions.message, openclaw.cron, functions.apply_patch",
+      ),
+    ).toEqual(["web_search", "message", "cron", "apply_patch"]);
+    // Aliases fold and duplicates (namespaced + bare) collapse to one id.
+    expect(parseCronToolsAllow("openclaw.bash, bash, BASH")).toEqual(["exec"]);
+    expect(parseCronToolsAllow(["openclaw.web_search", "web_search"])).toEqual(["web_search"]);
+  });
+
   it("returns undefined for empty input", () => {
     expect(parseCronToolsAllow(" ,  ")).toBeUndefined();
   });

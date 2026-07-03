@@ -12,6 +12,7 @@ import { normalizeCronJobCreate, normalizeCronJobPatch } from "../../cron/normal
 import type { CronDelivery } from "../../cron/types.js";
 import { normalizeHttpWebhookUrl } from "../../cron/webhook-url.js";
 import { GatewayClientRequestError } from "../../gateway/client.js";
+import { logWarn } from "../../logger.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 import { parseAgentSessionKey } from "../../sessions/session-key-utils.js";
 import { extractTextFromChatContent } from "../../shared/chat-content.js";
@@ -464,6 +465,31 @@ function cronCreatorToolNames(tools: readonly NormalizedCronCreatorTool[]): stri
   return tools.map((tool) => tool.name);
 }
 
+/**
+ * Requested cron `toolsAllow` entries that select none of the creator's
+ * registered tools. The intersection filter in capCronAgentTurnToolsAllow
+ * silently drops such entries, which previously left a partial (or empty)
+ * allowlist that fails closed at run time with an opaque "no callable tools
+ * remain" error (ISSUE-171). Surfacing them lets the author fix a typo or a
+ * namespace/name mismatch (e.g. `exec_command` vs the registered `exec`) when
+ * the job is created or edited, instead of at the next scheduled run.
+ */
+export function collectUnmatchedRequestedToolsAllow(params: {
+  requestedToolsAllow: readonly string[];
+  creatorToolNames: readonly string[];
+  pluginGroups: ReturnType<typeof buildPluginToolGroups>;
+}): string[] {
+  return params.requestedToolsAllow.filter((entry) => {
+    if (entry === "*") {
+      return false;
+    }
+    const entryPolicy = expandPolicyWithPluginGroups({ allow: [entry] }, params.pluginGroups);
+    return !params.creatorToolNames.some((toolName) =>
+      isToolAllowedByPolicyName(toolName, entryPolicy),
+    );
+  });
+}
+
 function capCronAgentTurnToolsAllow(params: {
   payload: Record<string, unknown>;
   creatorToolAllowlist: CronCreatorToolAllowlistEntry[];
@@ -503,6 +529,16 @@ function capCronAgentTurnToolsAllow(params: {
     { allow: requestedToolsAllow },
     pluginGroups,
   );
+  const unmatchedToolsAllow = collectUnmatchedRequestedToolsAllow({
+    requestedToolsAllow,
+    creatorToolNames,
+    pluginGroups,
+  });
+  if (unmatchedToolsAllow.length > 0) {
+    logWarn(
+      `cron toolsAllow: dropped ${unmatchedToolsAllow.length} requested tool(s) that matched no available tool: ${unmatchedToolsAllow.join(", ")}. Available tools: ${creatorToolNames.join(", ") || "(none)"}.`,
+    );
+  }
   params.payload.toolsAllow = creatorToolNames.filter((toolName) =>
     isToolAllowedByPolicyName(toolName, requestedPolicy),
   );

@@ -3,6 +3,7 @@
  * tool-call responses.
  */
 import type { AgentToolResult } from "openclaw/plugin-sdk/agent-core";
+import { OPENCLAW_TOOL_NAMESPACE } from "openclaw/plugin-sdk/agent-harness";
 import {
   consumeAdjustedParamsForToolCall,
   consumePreExecutionBlockedToolCall,
@@ -350,8 +351,12 @@ export type CodexDynamicToolBridge = {
   };
 };
 
-/** Namespace attached to OpenClaw-owned dynamic tools exposed to Codex. */
-export const CODEX_OPENCLAW_DYNAMIC_TOOL_NAMESPACE = "openclaw";
+/**
+ * Namespace attached to OpenClaw-owned dynamic tools exposed to Codex.
+ * Aliased to the shared core constant so the flattened `openclaw.` prefix the
+ * core resolver strips always matches the namespace Codex stamps here.
+ */
+export const CODEX_OPENCLAW_DYNAMIC_TOOL_NAMESPACE = OPENCLAW_TOOL_NAMESPACE;
 
 // Keep OpenClaw control-path tools directly callable even when Codex tool_search
 // is unavailable or resolves a connector-only universe. Developer instructions

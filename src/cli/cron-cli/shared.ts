@@ -8,6 +8,7 @@ import {
   normalizeOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
 import { colorize, isRich, theme } from "../../../packages/terminal-core/src/theme.js";
+import { normalizeToolName } from "../../agents/tool-policy-shared.js";
 import { listChannelPlugins } from "../../channels/plugins/index.js";
 import { parseAbsoluteTimeMs } from "../../cron/parse.js";
 import { resolveCronStaggerMs } from "../../cron/stagger.js";
@@ -258,10 +259,21 @@ export function parseCronToolsAllow(input: unknown): string[] | undefined {
     : typeof input === "string"
       ? input
       : "";
-  const tools = raw
-    .split(/[,\s]+/u)
-    .map((tool) => normalizeOptionalString(tool))
-    .filter((tool): tool is string => Boolean(tool));
+  const seen = new Set<string>();
+  const tools: string[] = [];
+  for (const token of raw.split(/[,\s]+/u)) {
+    if (!normalizeOptionalString(token)) {
+      continue;
+    }
+    // Canonicalize at the write boundary so namespaced authoring forms
+    // (`openclaw.web_search`, `functions.message`) and aliases (`bash`->`exec`)
+    // persist as the same bare ids the runtime resolver matches against.
+    const canonical = normalizeToolName(token);
+    if (!seen.has(canonical)) {
+      seen.add(canonical);
+      tools.push(canonical);
+    }
+  }
   return tools.length > 0 ? tools : undefined;
 }
 

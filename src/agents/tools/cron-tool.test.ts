@@ -21,7 +21,8 @@ vi.mock("../../config/sessions/delivery-info.js", () => ({
 
 import { GatewayClientRequestError } from "../../gateway/client.js";
 import { buildAgentPeerSessionKey } from "../../routing/session-key.js";
-import { createCronTool } from "./cron-tool.js";
+import { buildPluginToolGroups } from "../tool-policy.js";
+import { collectUnmatchedRequestedToolsAllow, createCronTool } from "./cron-tool.js";
 
 describe("cron tool", () => {
   type SchemaLike = {
@@ -2615,5 +2616,54 @@ describe("cron tool", () => {
       kind: "agentTurn",
       model: null,
     });
+  });
+});
+
+describe("collectUnmatchedRequestedToolsAllow (ISSUE-171 partial allowlist warning)", () => {
+  const emptyPluginGroups = buildPluginToolGroups<{ name: string }>({
+    tools: [],
+    toolMeta: () => undefined,
+  });
+
+  it("flags requested entries that select no creator tool (silent drops)", () => {
+    // Mirrors the Hill's cron: `exec_command` (registered id is `exec`) and
+    // `firecrawl_scrape` (plugin registers with `__`) resolve to nothing.
+    expect(
+      collectUnmatchedRequestedToolsAllow({
+        requestedToolsAllow: ["web_search", "message", "exec_command", "firecrawl_scrape"],
+        creatorToolNames: ["web_search", "web_fetch", "message", "exec", "cron"],
+        pluginGroups: emptyPluginGroups,
+      }),
+    ).toEqual(["exec_command", "firecrawl_scrape"]);
+  });
+
+  it("treats a wildcard entry as matching", () => {
+    expect(
+      collectUnmatchedRequestedToolsAllow({
+        requestedToolsAllow: ["*"],
+        creatorToolNames: ["web_search"],
+        pluginGroups: emptyPluginGroups,
+      }),
+    ).toEqual([]);
+  });
+
+  it("treats a glob entry that selects a creator tool as matching", () => {
+    expect(
+      collectUnmatchedRequestedToolsAllow({
+        requestedToolsAllow: ["web_*"],
+        creatorToolNames: ["web_search", "web_fetch"],
+        pluginGroups: emptyPluginGroups,
+      }),
+    ).toEqual([]);
+  });
+
+  it("returns nothing when every requested entry resolves", () => {
+    expect(
+      collectUnmatchedRequestedToolsAllow({
+        requestedToolsAllow: ["web_search", "message", "cron"],
+        creatorToolNames: ["web_search", "message", "cron", "exec"],
+        pluginGroups: emptyPluginGroups,
+      }),
+    ).toEqual([]);
   });
 });

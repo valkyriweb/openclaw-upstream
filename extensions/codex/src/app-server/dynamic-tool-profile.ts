@@ -1,6 +1,7 @@
 /**
  * Dynamic tool profile rules for Codex app-server tool loading and filtering.
  */
+import { normalizeToolName } from "openclaw/plugin-sdk/agent-harness";
 import type {
   CodexAppServerConnectionClass,
   CodexDynamicToolsLoading,
@@ -22,20 +23,19 @@ export const CODEX_APP_SERVER_OWNED_DYNAMIC_TOOL_EXCLUDES = [
   "tool_search_code",
 ] as const;
 
-const DYNAMIC_TOOL_NAME_ALIASES: Record<string, string> = {
-  bash: "exec",
-  "apply-patch": "apply_patch",
-};
-
 type CodexDynamicToolProfileEnv = {
   OPENCLAW_BUILD_PRIVATE_QA?: string;
   OPENCLAW_QA_FORCE_RUNTIME?: string;
 };
 
-/** Normalizes OpenClaw/Codex tool names before filtering and allowlist checks. */
+/**
+ * Normalizes OpenClaw/Codex tool names before filtering and allowlist checks.
+ * Delegates to the core resolver (single source of truth) so namespaced entries
+ * (e.g. `openclaw.web_search`, `functions.message`) and aliases (`bash`→`exec`)
+ * reconcile identically across the embedded, Codex, and pi-fork runtimes.
+ */
 export function normalizeCodexDynamicToolName(name: string): string {
-  const normalized = name.trim().toLowerCase();
-  return DYNAMIC_TOOL_NAME_ALIASES[normalized] ?? normalized;
+  return normalizeToolName(name);
 }
 
 /** Returns true for private QA runs that force the Codex runtime profile. */

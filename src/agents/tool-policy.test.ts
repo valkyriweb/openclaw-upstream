@@ -53,6 +53,28 @@ describe("tool-policy", () => {
     expect(normalizeToolName("READ")).toBe("read");
   });
 
+  it("resolves flattened tool namespaces to bare policy ids (ISSUE-171)", () => {
+    // `openclaw.`/`functions.` are serialized views of the structural
+    // {namespace, name} tool identity; policy matching needs the bare id.
+    expect(normalizeToolName("openclaw.web_search")).toBe("web_search");
+    expect(normalizeToolName("openclaw.web_fetch")).toBe("web_fetch");
+    expect(normalizeToolName("functions.message")).toBe("message");
+    expect(normalizeToolName("openclaw.cron")).toBe("cron");
+    // Namespace strip composes with alias mapping.
+    expect(normalizeToolName("openclaw.bash")).toBe("exec");
+    expect(normalizeToolName("functions.apply-patch")).toBe("apply_patch");
+    // Bare ids and MCP/plugin `__` names are never falsely stripped.
+    expect(normalizeToolName("web_search")).toBe("web_search");
+    expect(normalizeToolName("firecrawl__scrape")).toBe("firecrawl__scrape");
+    // Unknown namespaces are left intact (only known prefixes strip).
+    expect(normalizeToolName("mcp.foo")).toBe("mcp.foo");
+    // Straggler entries de-namespace correctly even when the bare id is not a
+    // core tool (exec_command vs exec, firecrawl_scrape vs firecrawl__scrape);
+    // the fail-loud guard, not the resolver, surfaces those mismatches.
+    expect(normalizeToolName("functions.exec_command")).toBe("exec_command");
+    expect(normalizeToolName("openclaw.firecrawl_scrape")).toBe("firecrawl_scrape");
+  });
+
   it("collects explicit allowlist entries", () => {
     expect(
       collectExplicitAllowlist([
@@ -183,5 +205,34 @@ describe("isToolAllowedByPolicyName — apply_patch / write deny decoupling (#76
     expect(isToolAllowedByPolicyName("apply_patch", { deny: ["write", "apply_patch"] })).toBe(
       false,
     );
+  });
+});
+
+describe("runtime toolsAllow namespace resolution (ISSUE-171 regression)", () => {
+  // Hill's cron authored tool names in their flattened provider/namespace form.
+  // Pre-fix these resolved to zero callable tools ("No callable tools remain");
+  // post-fix the entries that map to real tool ids resolve and are allowed.
+  const HILL_TOOLS_ALLOW = [
+    "openclaw.web_search",
+    "openclaw.web_fetch",
+    "openclaw.firecrawl_scrape",
+    "functions.message",
+    "functions.exec_command",
+    "functions.apply_patch",
+    "openclaw.cron",
+  ];
+
+  it("allows namespaced entries that map to real tool ids", () => {
+    const policy: SandboxToolPolicy = { allow: HILL_TOOLS_ALLOW, deny: [] };
+    for (const tool of ["web_search", "web_fetch", "message", "apply_patch", "cron"]) {
+      expect(isToolAllowedByPolicyName(tool, policy)).toBe(true);
+    }
+  });
+
+  it("keeps the allowlist restrictive for tools it does not list", () => {
+    const policy: SandboxToolPolicy = { allow: HILL_TOOLS_ALLOW, deny: [] };
+    expect(isToolAllowedByPolicyName("read", policy)).toBe(false);
+    expect(isToolAllowedByPolicyName("write", policy)).toBe(false);
+    expect(isToolAllowedByPolicyName("gateway", policy)).toBe(false);
   });
 });

@@ -21,13 +21,54 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
   "apply-patch": "apply_patch",
 };
 
+/**
+ * Canonical namespace for OpenClaw-owned tools. Tool identity is structurally
+ * `{namespace, name}` — e.g. the Codex runtime tags OpenClaw dynamic tools with
+ * this namespace, and providers expose them inside the `functions` call
+ * container. Kept here as the single source of truth so runtimes that need the
+ * namespace (Codex app-server, spawned pi-fork adaptor) import it instead of
+ * re-declaring it.
+ */
+export const OPENCLAW_TOOL_NAMESPACE = "openclaw";
+
+/**
+ * Flattened runtime tool namespaces whose dotted `<namespace>.<tool>` string is
+ * a serialized view of the structural `{namespace, name}` identity. When that
+ * form leaks into a policy list (e.g. a cron `toolsAllow` authored as
+ * `openclaw.web_search` / `functions.message`), the namespace segment must be
+ * reconciled back to the bare tool id used for matching. Real tool ids never
+ * contain "." and MCP/plugin tools use the "__" separator, so a known-namespace
+ * dotted prefix is unambiguous to strip.
+ */
+export const KNOWN_TOOL_NAMESPACE_PREFIXES: ReadonlySet<string> = new Set([
+  OPENCLAW_TOOL_NAMESPACE,
+  "functions",
+]);
+
+/** Peels flattened `<namespace>.` prefixes (e.g. `openclaw.`/`functions.`) off a tool id. */
+function stripKnownToolNamespacePrefix(folded: string): string {
+  let current = folded;
+  for (;;) {
+    const dot = current.indexOf(".");
+    if (dot <= 0 || !KNOWN_TOOL_NAMESPACE_PREFIXES.has(current.slice(0, dot))) {
+      return current;
+    }
+    const rest = current.slice(dot + 1);
+    if (!rest) {
+      return current;
+    }
+    current = rest;
+  }
+}
+
 /** Core tool groups exposed to allow/deny policy config. */
 export const TOOL_GROUPS: Record<string, string[]> = { ...CORE_TOOL_GROUPS };
 
 /** Normalizes a tool name or alias to the policy id used for matching. */
 export function normalizeToolName(name: string) {
-  const normalized = normalizeLowercaseStringOrEmpty(name);
-  return TOOL_NAME_ALIASES[normalized] ?? normalized;
+  const folded = normalizeLowercaseStringOrEmpty(name);
+  const deNamespaced = stripKnownToolNamespacePrefix(folded);
+  return TOOL_NAME_ALIASES[deNamespaced] ?? deNamespaced;
 }
 
 /** Checks whether an in-progress prefix can still resolve to an allowed tool or alias. */
