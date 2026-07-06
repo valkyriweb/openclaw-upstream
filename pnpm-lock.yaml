@@ -33,6 +33,7 @@ overrides:
   yauzl: 3.2.1
   protobufjs: 7.6.3
   uuid: 14.0.0
+  openclaw@2026.5.28>undici: 8.5.0
 
 packageExtensionsChecksum: sha256-zZ8fyodhMTumshonC7kktCqTPsiHL3UAyS9vltFAlMo=
 
@@ -1301,13 +1302,16 @@ importers:
 
   extensions/pi-fork:
     dependencies:
-      openclaw:
-        specifier: workspace:*
-        version: link:../..
+      '@modelcontextprotocol/sdk':
+        specifier: 1.29.0
+        version: 1.29.0(zod@4.4.3)
     devDependencies:
       '@openclaw/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
+      openclaw:
+        specifier: workspace:*
+        version: link:../..
 
   extensions/pixverse:
     devDependencies:
