@@ -81,9 +81,11 @@ export function createReadinessChecker(deps: {
       );
     }
     if (deps.getGatewayDraining?.()) {
-      return withEventLoopHealth(
+      return withReadinessExtras(
         { ready: false, failing: ["gateway-draining"], uptimeMs },
         deps.getEventLoopHealth,
+        deps.getIntervalHealth,
+        now,
       );
     }
     if (deps.shouldSkipChannelReadiness?.()) {
