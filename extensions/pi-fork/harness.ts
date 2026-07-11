@@ -3,6 +3,10 @@
  *
  * Selection policy:
  *   - Provider "pi-fork" → priority 100 (synthetic pi-mono-fork model refs)
+ *   - requestedRuntime === "pi-fork" → priority 100 (explicit `agentRuntime`
+ *     pin on a real provider ref, e.g. clawrouter/gpt-5.6-sol). OpenClaw's
+ *     forced-pin selection validates the pinned harness through supports(),
+ *     so this must return supported for the pin to run (ISSUE-169 contract).
  *   - Any other provider → unsupported; this harness must not steal built-in pi
  *     or native Codex traffic.
  *
@@ -31,6 +35,14 @@ export function createPiAgentHarness(config: PiHarnessConfig = {}): AgentHarness
     supports(ctx) {
       const provider = ctx.provider.trim().toLowerCase();
       if (provider === "pi-fork") {
+        return { supported: true, priority: 100 };
+      }
+      // Honor an explicit `agentRuntime: { id: "pi-fork" }` pin on a real
+      // provider ref (e.g. clawrouter/gpt-5.6-sol). OpenClaw's forced-pin
+      // selection validates the pinned harness through supports(); without this
+      // the pinned turn is rejected with `Requested agent harness "pi-fork"
+      // does not support <provider>/<model>`. Restores the ISSUE-169 contract.
+      if (ctx.requestedRuntime === "pi-fork") {
         return { supported: true, priority: 100 };
       }
       // Fail closed on non-pi-fork providers — harness is not a generic fallback.

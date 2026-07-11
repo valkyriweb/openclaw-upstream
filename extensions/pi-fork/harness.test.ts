@@ -34,6 +34,41 @@ vi.mock("./session-binding.js", () => ({
 
 import { createPiAgentHarness } from "./harness.js";
 
+type SupportsCtx = Parameters<ReturnType<typeof createPiAgentHarness>["supports"]>[0];
+
+const supportCtx = (over: Partial<SupportsCtx> & { provider: string }): SupportsCtx =>
+  ({ modelId: "gpt-5.6-sol", requestedRuntime: "auto", ...over }) as SupportsCtx;
+
+describe("createPiAgentHarness supports", () => {
+  it("supports the synthetic pi-fork provider", () => {
+    const harness = createPiAgentHarness();
+    expect(harness.supports(supportCtx({ provider: "pi-fork" }))).toEqual({
+      supported: true,
+      priority: 100,
+    });
+  });
+
+  // Regression: beta.2 core validates a forced `agentRuntime: pi-fork` pin
+  // through supports() with requestedRuntime === "pi-fork" on the real provider.
+  // Rejecting it here took Kael's WhatsApp lane down (ISSUE-190).
+  it("supports an explicit pi-fork runtime pin on a real provider ref", () => {
+    const harness = createPiAgentHarness();
+    expect(
+      harness.supports(
+        supportCtx({ provider: "clawrouter", modelId: "gpt-5.6-sol", requestedRuntime: "pi-fork" }),
+      ),
+    ).toEqual({ supported: true, priority: 100 });
+  });
+
+  it("does not steal a real provider turn without a pi-fork pin", () => {
+    const harness = createPiAgentHarness();
+    const support = harness.supports(
+      supportCtx({ provider: "clawrouter", modelId: "gpt-5.6-sol", requestedRuntime: "auto" }),
+    );
+    expect(support.supported).toBe(false);
+  });
+});
+
 describe("createPiAgentHarness compact", () => {
   beforeEach(() => {
     vi.clearAllMocks();
