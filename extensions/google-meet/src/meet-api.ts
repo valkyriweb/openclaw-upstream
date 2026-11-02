@@ -1,5 +1,6 @@
 import { readProviderJsonResponse } from "openclaw/plugin-sdk/provider-http";
 import { requestGoogleApi } from "./google-api.js";
+import { readMeetMeetingCode } from "./meet-url.js";
 
 const GOOGLE_MEET_API_ORIGIN = "https://meet.googleapis.com";
 const GOOGLE_MEET_API_BASE_URL = `${GOOGLE_MEET_API_ORIGIN}/v2`;
@@ -146,14 +147,11 @@ function normalizeGoogleMeetSpaceName(input: string): string {
     if (url.hostname !== GOOGLE_MEET_URL_HOST) {
       throw new Error(`Expected a ${GOOGLE_MEET_URL_HOST} URL, received ${url.hostname}`);
     }
-    const firstSegment = url.pathname
-      .split("/")
-      .map((segment) => segment.trim())
-      .find(Boolean);
-    if (!firstSegment) {
+    const code = readMeetMeetingCode(url.pathname);
+    if (!code) {
       throw new Error("Google Meet URL did not include a meeting code");
     }
-    return `spaces/${firstSegment}`;
+    return `spaces/${code}`;
   }
   return `spaces/${trimmed}`;
 }
