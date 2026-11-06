@@ -158,9 +158,23 @@ export function meetStatusScript(params: {
     const direct = candidates().find((node) =>
       /\\b(?:audio|microphone|device) settings\\b/i.test(deviceNodeLabel(node)) && !node.disabled
     );
-    /* LOCAL-meet-settings */ if (direct && !readOnly) {
+    /* LOCAL-meet-settings */ const waitForControl = async (ms) => {
+      for (let waited = 0; waited < ms && !findMicrophoneDeviceControl(); waited += 100) await waitForUi();
+    };
+    const openAudioTab = async () => {
+      const audioTab = [...document.querySelectorAll('button, [role="tab"]')].find((node) =>
+        /^\\s*(?:\\w+\\s*)?audio\\s*(?:audio\\s*)?$/i.test(deviceNodeLabel(node)) && !node.disabled
+      );
+      if (audioTab) {
+        audioTab.click();
+        await waitForControl(2000);
+      }
+    };
+    if (direct && !readOnly) {
       direct.click();
-      await waitForUi();
+      await waitForControl(1000);
+      if (findMicrophoneDeviceControl()) return;
+      await openAudioTab();
       if (findMicrophoneDeviceControl()) return;
     }
     /* LOCAL-meet-settings: Meet keeps a hidden Settings menuitem in the DOM; open More options first */
@@ -181,18 +195,9 @@ export function meetStatusScript(params: {
     }
     if (!settings || readOnly) return;
     settings.click();
-    /* LOCAL-meet-settings */ const waitForControl = async (ms) => {
-      for (let waited = 0; waited < ms && !findMicrophoneDeviceControl(); waited += 100) await waitForUi();
-    };
     await waitForControl(3000);
     if (findMicrophoneDeviceControl()) return;
-    const audioTab = [...document.querySelectorAll('button, [role="tab"]')].find((node) =>
-      /^\\s*(?:\\w+\\s*)?audio\\s*(?:audio\\s*)?$/i.test(deviceNodeLabel(node)) && !node.disabled
-    );
-    if (audioTab) {
-      audioTab.click();
-      await waitForControl(2000);
-    }
+    await openAudioTab();
   };
   const routeMeetAudioInput = async () => {
     if (

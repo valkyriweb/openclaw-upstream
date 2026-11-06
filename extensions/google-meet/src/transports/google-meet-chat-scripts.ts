@@ -54,7 +54,8 @@ function meetingUrlGuard(meetingUrl: string, failure: string): string {
   let currentMeetingUrl;
   try {
     const currentUrl = new URL(location.href);
-    currentMeetingUrl = currentUrl.origin + currentUrl.pathname.toLowerCase().replace(/\\/$/, "");
+    // Meet redirects a joined call to /meet/<code>; compare in the /<code> form.
+    currentMeetingUrl = currentUrl.origin + currentUrl.pathname.toLowerCase().replace(/\\/$/, "").replace(/^\\/meet(?=\\/)/, "");
   } catch {
     return JSON.stringify(${failure});
   }
@@ -64,8 +65,14 @@ function meetingUrlGuard(meetingUrl: string, failure: string): string {
 }
 
 export function meetChatReadScript(meetingUrl: string): string {
-  return `() => {${meetingUrlGuard(meetingUrl, "{ urlMatched: false }")}
+  return `async () => {${meetingUrlGuard(meetingUrl, "{ urlMatched: false }")}
   ${CHAT_DOM_SOURCE}
+  // Meet renders chat only while the panel is open, so open it to observe.
+  if (!chatLog()) toggleChatPanel();
+  const deadline = Date.now() + ${CHAT_PANEL_OPEN_TIMEOUT_MS};
+  while (!chatLog() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
   const messages = readChatMessages();
   return JSON.stringify({ urlMatched: true, panelOpen: messages !== undefined, messages: messages ?? [] });
 }`;

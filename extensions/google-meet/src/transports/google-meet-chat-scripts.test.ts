@@ -50,9 +50,24 @@ describe("meetChatReadScript", () => {
     ]);
   });
 
-  it("returns an empty list when the chat panel is closed", async () => {
-    const { run } = page("<div>in call</div>");
-    expect(parseMeetChatReadResult(await run(meetChatReadScript(MEET_URL)))).toStrictEqual([]);
+  it("opens a closed chat panel before reading", async () => {
+    const { dom, run } = page("<div>in call</div>");
+    dom.window.document.body.addEventListener("keydown", (event) => {
+      const key = event as KeyboardEvent;
+      if (key.key === "c" && key.ctrlKey && key.altKey) {
+        dom.window.document.body.insertAdjacentHTML("beforeend", chatPanel([messageGroup(luke)]));
+      }
+    });
+    expect(parseMeetChatReadResult(await run(meetChatReadScript(MEET_URL)))).toStrictEqual([
+      { id: luke.id, text: luke.text, sender: "Luke", at: luke.at, self: false },
+    ]);
+  });
+
+  it("reads a joined tab that Meet redirected to /meet/<code>", async () => {
+    const redirected = new URL(MEET_URL);
+    redirected.pathname = `/meet${redirected.pathname}`;
+    const { run } = page(chatPanel([messageGroup(luke)]), redirected.href);
+    expect(parseMeetChatReadResult(await run(meetChatReadScript(MEET_URL)))).toHaveLength(1);
   });
 
   it("returns undefined when the tab shows another meeting", async () => {
