@@ -1633,12 +1633,15 @@ describe("google-meet plugin", () => {
         expect(transcript).toMatchObject({ droppedLines: 2, startIndex: 3, nextIndex: 4 });
         expect(transcript.lines.map((line) => line.text)).toEqual(["fourth line"]);
         const readCalls = callGatewayFromCli.mock.calls.slice(beforeRead);
-        expect(readCalls).toHaveLength(1);
-        expect(requireRecord(readCalls[0]?.[2], "transcript request")).toMatchObject({
-          method: "POST",
-          path: "/act",
-          body: { targetId: "local-meet-tab" },
-        });
+        // The transcript read also reads the in-call chat (Centaur chat patch).
+        expect(readCalls).toHaveLength(2);
+        for (const call of readCalls) {
+          expect(requireRecord(call?.[2], "transcript or chat request")).toMatchObject({
+            method: "POST",
+            path: "/act",
+            body: { targetId: "local-meet-tab" },
+          });
+        }
 
         await invokeGoogleMeetGatewayMethodForTest(methods, "googlemeet.leave", {
           sessionId: joined.session.id,
