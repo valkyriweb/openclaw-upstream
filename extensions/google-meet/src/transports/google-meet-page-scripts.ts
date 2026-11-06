@@ -118,6 +118,8 @@ export function meetStatusScript(params: {
       '[role="combobox"][aria-label*="microphone" i]',
       '[role="listbox"][aria-label*="microphone" i]',
       '[aria-haspopup="listbox"][aria-label*="microphone" i]',
+      /* PR179010 */ 'button[aria-haspopup="menu"][aria-label^="microphone:" i]',
+      /* PR179010 */ '[role="button"][aria-haspopup="menu"][aria-label^="microphone:" i]',
     ];
     for (const selector of selectors) {
       const control = document.querySelector(selector);
@@ -156,31 +158,46 @@ export function meetStatusScript(params: {
     const direct = candidates().find((node) =>
       /\\b(?:audio|microphone|device) settings\\b/i.test(deviceNodeLabel(node)) && !node.disabled
     );
-    let settings = direct || candidates().find((node) =>
-      /^\\s*settings\\s*$/i.test(deviceNodeLabel(node)) && !node.disabled
-    );
+    /* LOCAL-meet-settings */ const waitForControl = async (ms) => {
+      for (let waited = 0; waited < ms && !findMicrophoneDeviceControl(); waited += 100) await waitForUi();
+    };
+    const openAudioTab = async () => {
+      const audioTab = [...document.querySelectorAll('button, [role="tab"]')].find((node) =>
+        /^\\s*(?:\\w+\\s*)?audio\\s*(?:audio\\s*)?$/i.test(deviceNodeLabel(node)) && !node.disabled
+      );
+      if (audioTab) {
+        audioTab.click();
+        await waitForControl(2000);
+      }
+    };
+    if (direct && !readOnly) {
+      direct.click();
+      await waitForControl(1000);
+      if (findMicrophoneDeviceControl()) return;
+      await openAudioTab();
+      if (findMicrophoneDeviceControl()) return;
+    }
+    /* LOCAL-meet-settings: Meet keeps a hidden Settings menuitem in the DOM; open More options first */
+    let settings = undefined;
     if (!settings && !readOnly) {
       const moreOptions = candidates().find((node) =>
-        /^\\s*more options\\s*$/i.test(deviceNodeLabel(node)) && !node.disabled
+        /* LOCAL-meet-settings */ /^\\s*more options(?:\\s*more_vert)*\\s*$/i.test(deviceNodeLabel(node)) && !node.disabled
       );
       if (moreOptions) {
         moreOptions.click();
-        await waitForUi();
-        settings = candidates().find((node) =>
-          /^\\s*settings\\s*$/i.test(deviceNodeLabel(node)) && !node.disabled
-        );
+        /* LOCAL-meet-settings */ for (let waited = 0; waited < 2000 && !settings; waited += 100) {
+          await waitForUi();
+          settings = candidates().find((node) =>
+            /^\\s*(?:settings\\s*)+$/i.test(deviceNodeLabel(node)) && !node.disabled
+          );
+        }
       }
     }
     if (!settings || readOnly) return;
     settings.click();
-    await waitForUi();
-    const audioTab = [...document.querySelectorAll('button, [role="tab"]')].find((node) =>
-      /^\\s*audio\\s*$/i.test(deviceNodeLabel(node)) && !node.disabled
-    );
-    if (audioTab) {
-      audioTab.click();
-      await waitForUi();
-    }
+    await waitForControl(3000);
+    if (findMicrophoneDeviceControl()) return;
+    await openAudioTab();
   };
   const routeMeetAudioInput = async () => {
     if (
@@ -296,7 +313,7 @@ export function meetStatusScript(params: {
     ) return;
     const mediaElements = [...document.querySelectorAll('audio, video')]
       .filter((el) => typeof el.setSinkId === 'function');
-    if (mediaElements.length === 0) return;
+    /* PR179010 */
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       const inputFamily = audioDeviceFamily(audioInputDeviceLabel);
@@ -312,6 +329,14 @@ export function meetStatusScript(params: {
         if (devices.some((device) => device.kind === 'audiooutput')) {
           notes.push("A supported virtual speaker output was not visible to Meet.");
         }
+        return;
+      }
+      /* PR179010 */ if (mediaElements.length === 0) {
+        const control = document.querySelector(
+          'button[aria-haspopup="menu"][aria-label^="speaker:" i], [role="button"][aria-haspopup="menu"][aria-label^="speaker:" i]'
+        );
+        audioOutputRouted = Boolean(control) && audioDeviceFamily(deviceNodeLabel(control)) === audioDeviceFamily(output.label);
+        if (audioOutputRouted) audioOutputDeviceLabel = output.label;
         return;
       }
       let routed = 0;

@@ -189,8 +189,8 @@ async function loadMediaFromRef(
         "prepareTurnAttachments",
       )?.prepareTurnAttachments,
     );
-  const sandbox = gatewayAttachment ? undefined : options.sandbox;
-  const localRoots = gatewayAttachment
+  let sandbox = gatewayAttachment ? undefined : options.sandbox;
+  let localRoots = gatewayAttachment
     ? [getMediaDir()]
     : (options.localRoots ?? (options.workspaceOnly ? [options.workspaceDir] : undefined));
   const redactedRef = redactSensitiveText(ref.raw || ref.resolved);
@@ -213,10 +213,19 @@ async function loadMediaFromRef(
         });
         targetPath = resolved.resolved;
       } catch (err) {
-        log.warn(
-          `${label}: sandbox validation failed for ${redactedRef}: ${redactSensitiveText(formatErrorMessage(err))}`,
-        );
-        return null;
+        // A transcript's own managed inbound fact (never prompt text) was admitted by the
+        // Gateway; its per-turn sandbox copy is gone on replay, so read the managed original.
+        const managedInbound =
+          attachment && ref.type === "media-uri" && ref.resolved.startsWith("media://inbound/");
+        if (!managedInbound) {
+          log.warn(
+            `${label}: sandbox validation failed for ${redactedRef}: ${redactSensitiveText(formatErrorMessage(err))}`,
+          );
+          return null;
+        }
+        sandbox = undefined;
+        localRoots = [getMediaDir()];
+        targetPath = await resolveMediaReferenceLocalPath(ref.resolved);
       }
     } else if (!path.isAbsolute(targetPath)) {
       targetPath = path.resolve(ref.workspaceDir ?? options.workspaceDir, targetPath);

@@ -74,7 +74,7 @@ describe("Google Meet registered participation lifecycle", () => {
             sessionId,
             active: true,
             sourceOrder: 0,
-            capabilities: [],
+            capabilities: ["chat"],
             sources: [],
           });
 
