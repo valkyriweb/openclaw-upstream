@@ -16,6 +16,7 @@ import {
 } from "../../../media/runtime-prompt-image-provenance.js";
 import { buildPersistedUserTurnMessage } from "../../../sessions/user-turn-transcript.js";
 import { captureEnv, setTestEnvValue } from "../../../test-utils/env.js";
+import { createHostSandboxFsBridge } from "../../test-helpers/host-sandbox-fs-bridge.js";
 import type { AgentMessage } from "../../runtime/index.js";
 import {
   buildPromptImageFailureNotice,
@@ -187,6 +188,45 @@ describe("structured prompt media replay", () => {
       expect(replayed.content).toEqual([{ type: "text", text: "missing attachment" }]);
     } finally {
       await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it("replays a managed inbound photo whose sandbox copy is gone on a later turn", async () => {
+    const stateDir = tempDirs.make("openclaw-replay-inbound-state-");
+    const root = tempDirs.make("openclaw-replay-inbound-sandbox-");
+    const photo = createSolidPngBuffer(1, 1, { r: 0, g: 0, b: 255 });
+    await fs.mkdir(path.join(stateDir, "media", "inbound"), { recursive: true });
+    await fs.writeFile(path.join(stateDir, "media", "inbound", "photo.png"), photo);
+    const envSnapshot = captureEnv(["OPENCLAW_STATE_DIR"]);
+    setTestEnvValue("OPENCLAW_STATE_DIR", stateDir);
+    const options = {
+      workspaceDir: root,
+      workspaceOnly: true,
+      model: { input: ["text", "image"] as Array<"text" | "image"> },
+      sandbox: { root, bridge: createHostSandboxFsBridge(root) },
+    };
+    try {
+      const message = {
+        role: "user" as const,
+        content: "Describe this photo",
+        __openclaw: {
+          media: [{ url: "media://inbound/photo.png", contentType: "image/png" }],
+        },
+      } as unknown as AgentMessage;
+      const [replayed] = await hydratePromptMediaMessages([message], options);
+      expect((replayed as unknown as { content: unknown[] }).content).toContainEqual({
+        type: "image",
+        data: photo.toString("base64"),
+        mimeType: "image/png",
+      });
+
+      const prompt = await detectAndLoadPromptImages({
+        ...options,
+        prompt: "inspect media://inbound/photo.png",
+      });
+      expect(prompt.loadedCount).toBe(0);
+    } finally {
+      envSnapshot.restore();
     }
   });
 
