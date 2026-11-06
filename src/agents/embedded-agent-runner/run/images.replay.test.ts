@@ -16,8 +16,8 @@ import {
 } from "../../../media/runtime-prompt-image-provenance.js";
 import { buildPersistedUserTurnMessage } from "../../../sessions/user-turn-transcript.js";
 import { captureEnv, setTestEnvValue } from "../../../test-utils/env.js";
-import { createHostSandboxFsBridge } from "../../test-helpers/host-sandbox-fs-bridge.js";
 import type { AgentMessage } from "../../runtime/index.js";
+import { createHostSandboxFsBridge } from "../../test-helpers/host-sandbox-fs-bridge.js";
 import {
   buildPromptImageFailureNotice,
   detectAndLoadPromptImages,
