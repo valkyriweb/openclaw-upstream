@@ -39,6 +39,8 @@ afterEach(async () => {
 });
 
 it("makes an opaque inline-view reference available to Code Mode, not the private contents", async () => {
+  // This checks result projection, not whether the host parks work at its deadline.
+  mockClock();
   const payload = { resultId: "0123456789abcdef0123456789abcdef" };
   const summary = "Answer visible to its requester";
   const read = tool("private_read", async () =>
