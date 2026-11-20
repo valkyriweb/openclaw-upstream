@@ -232,15 +232,18 @@ function TextAttachment(props: TextAttachmentProps, host: SolidBridgeElement<Tex
         </p>
       ) : (
         <Show when={reader()} keyed fallback={<AttachmentPreviewSkeleton />}>
-          {(content) =>
-            markdown() && !source() ? (
+          {(content) => (
+            <Show
+              when={markdown() && !source()}
+              fallback={
+                <pre class="sidebar-attachment-preview__text" tabindex={0} aria-label={props.label}>
+                  {content.text}
+                </pre>
+              }
+            >
               <MarkdownAttachment text={content.text} label={props.label} />
-            ) : (
-              <pre class="sidebar-attachment-preview__text" tabindex={0} aria-label={props.label}>
-                {content.text}
-              </pre>
-            )
-          }
+            </Show>
+          )}
         </Show>
       )}
     </>
