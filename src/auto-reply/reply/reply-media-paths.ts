@@ -245,7 +245,7 @@ export function createReplyMediaSourcePreparer(
       cfg: params.cfg,
       agentId,
       workspaceDir: sourceWorkspaceDir,
-      restrictToWorkspace: workspaceHtmlAttachment,
+      ...(workspaceHtmlAttachment ? { restrictToWorkspace: true } : {}),
       sessionWorkspaceDir: sessionWorkspaceDir ?? params.sessionWorkspaceDir,
       workspaceOnly: params.workspaceOnly,
       allowHostWorkspace: params.allowHostWorkspace,

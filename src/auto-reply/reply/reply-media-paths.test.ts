@@ -489,11 +489,16 @@ describe("createReplyMediaPathNormalizer", () => {
     });
 
     expect(resolveAgentScopedHostOutboundMediaAccess).toHaveBeenCalledTimes(1);
-    expect(expectAgentScopedMediaAccessCall()).toEqual({
+    expect(expectAgentScopedMediaAccessCall()).toStrictEqual({
       cfg: {},
       agentId: undefined,
       workspaceDir: "/tmp/agent-workspace",
+      sessionWorkspaceDir: undefined,
+      workspaceOnly: undefined,
+      allowHostWorkspace: undefined,
       mediaSources: [path.join("/tmp/agent-workspace", "out", "photo.png")],
+      mediaAccess: undefined,
+      workspaceMediaAccess: undefined,
       sessionKey: undefined,
       messageProvider: "whatsapp",
       accountId: "source-account",
