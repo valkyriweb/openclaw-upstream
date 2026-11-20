@@ -63,7 +63,6 @@ type SidebarAttachmentProps = {
   content: Extract<SidebarContent, { kind: "attachment" }>;
   onRequestUpdate: () => void;
   runtime: AttachmentSidebarRuntime;
-  embedSandboxMode: EmbedSandboxMode;
   download?: { pending: boolean; error: string | null; onDownload: () => void };
 };
 
@@ -186,7 +185,6 @@ function AttachmentPreview(props: SidebarAttachmentProps) {
         <ChatTextAttachment
           plainText={props.content.plainText ?? false}
           actions={props.content.renderActions?.() ?? emptyLegacyContent}
-          embedSandboxMode={props.embedSandboxMode}
           src={model().src ?? ""}
           sourceIdentity={model().sourceIdentity}
           label={props.content.title}
@@ -548,7 +546,6 @@ export function SidebarPanel(props: SidebarPanelProps) {
                       content={content()}
                       onRequestUpdate={props.onAttachmentUpdate}
                       runtime={props.attachmentRuntime}
-                      embedSandboxMode={props.embedSandboxMode ?? "scripts"}
                       download={props.attachmentDownload}
                     />
                   </div>

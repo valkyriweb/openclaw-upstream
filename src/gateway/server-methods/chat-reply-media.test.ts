@@ -355,6 +355,59 @@ describe("normalizeWebchatReplyMediaPathsForDisplay", () => {
     ]);
   });
 
+  it("stages workspace HTML as an unchanged WebChat document", async () => {
+    const { cfg, workspaceDir } = createMediaTestContext({ allowRead: true });
+    const filename = "tenant-review.html";
+    const htmlPath = path.join(workspaceDir, filename);
+    const bytes = Buffer.from(
+      "\ufeff<!doctype html>\r\n<h1>Résumé</h1>\n<script>void 0</script>\n",
+    );
+    await fs.mkdir(workspaceDir, { recursive: true });
+    await fs.writeFile(htmlPath, bytes);
+
+    const payload = await normalizeReplyMedia({ cfg, payloads: [{ mediaUrls: [htmlPath] }] });
+    const stagedPath = requireString(payload?.mediaUrls?.[0], "staged HTML path");
+    expect(stagedPath).not.toBe(htmlPath);
+    expect(await fs.readFile(stagedPath)).toEqual(bytes);
+    const { assistantContent } = await buildAssistantReplyContent({
+      sessionKey: TEST_SESSION_KEY,
+      agentId: "main",
+      payloads: payload ? [payload] : [],
+      managedMediaLocalRoots: getAgentScopedMediaLocalRoots(cfg, "main"),
+    });
+    expect(assistantContent).toEqual([
+      expect.objectContaining({
+        type: "attachment",
+        attachment: expect.objectContaining({
+          kind: "document",
+          mimeType: "text/html",
+          label: filename,
+        }),
+      }),
+    ]);
+  });
+
+  it("rejects binary HTML and keeps workspace HTML reads inside the workspace", async () => {
+    const { cfg, stateDir, workspaceDir } = createMediaTestContext({ allowRead: true });
+    const binary = path.join(workspaceDir, "binary.html");
+    const outside = path.join(stateDir, "outside.html");
+    const alias = path.join(workspaceDir, "alias.html");
+    await fs.mkdir(workspaceDir, { recursive: true });
+    await fs.writeFile(binary, PNG_BYTES);
+    await fs.writeFile(outside, "<!doctype html><p>Outside</p>");
+    await fs.symlink(outside, alias);
+
+    const payload = await normalizeReplyMedia({
+      cfg,
+      payloads: [{ mediaUrls: [binary, outside, alias] }],
+    });
+    expect(payload?.mediaUrls).toBeUndefined();
+    expect(payload?.text).toContain("binary.html: Rejected by the local attachment allowlist");
+    expect(payload?.text).toContain("outside.html:");
+    expect(payload?.text).toContain("alias.html:");
+    await expectOutboundMediaMissing(stateDir);
+  });
+
   it("preserves sensitive images without staging", async () => {
     const { stateDir, agentDir, cfg } = createMediaTestContext({ allowRead: true });
     const source = await createCodexHomeImage({ agentDir });

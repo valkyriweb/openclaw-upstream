@@ -14,6 +14,7 @@ export async function resolveWebchatAttachmentFromUrl(
   options: {
     mediaAccess: HostOutboundMediaAccess;
     localMediaMaxBytes: number;
+    workspaceHtmlAttachment?: boolean;
   },
 ): Promise<{ path: string; contentType?: string }> {
   const localPath = resolveLocalMediaPath(mediaUrl);
@@ -50,5 +51,6 @@ export async function resolveWebchatAttachmentFromUrl(
   }
   return await resolveOutboundAttachmentFromUrl(mediaUrl, maxBytes, {
     mediaAccess: options.mediaAccess,
+    ...(options.workspaceHtmlAttachment ? { workspaceHtmlAttachment: true } : {}),
   });
 }

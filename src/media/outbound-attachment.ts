@@ -8,20 +8,21 @@ export async function resolveOutboundAttachmentFromUrl(
   maxBytes: number,
   options?: {
     mediaAccess?: OutboundMediaAccess;
+    workspaceHtmlAttachment?: boolean;
     localRoots?: readonly string[];
     readFile?: (filePath: string) => Promise<Buffer>;
   },
 ): Promise<{ path: string; contentType?: string }> {
   const { loadWebMedia, markTrustedGeneratedHtmlPath } = await import("./web-media.js");
-  const media = await loadWebMedia(
-    mediaUrl,
-    buildOutboundMediaLoadOptions({
+  const media = await loadWebMedia(mediaUrl, {
+    ...buildOutboundMediaLoadOptions({
       maxBytes,
       mediaAccess: options?.mediaAccess,
       mediaLocalRoots: options?.localRoots,
       mediaReadFile: options?.readFile,
     }),
-  );
+    ...(options?.workspaceHtmlAttachment ? { workspaceHtmlAttachment: true } : {}),
+  });
   // Preserve source file names so outbound attachments keep useful names after UUID staging.
   const saved = await saveMediaBuffer(
     media.buffer,
