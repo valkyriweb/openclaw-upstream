@@ -225,7 +225,6 @@ suite.define(() => {
                     cases: [
                       { match: { html: source }, response: view(source) },
                       { match: { html: editedSource }, response: view(editedSource) },
-                      { match: { html: attachmentSource }, response: view(attachmentSource) },
                     ],
                   },
                 },
@@ -354,50 +353,23 @@ suite.define(() => {
               expect(await document.getByRole("textbox", { name: "Local note" }).inputValue()).toBe(
                 "Retain this page",
               );
+              const previewRequests = await gateway.getRequests("canvas.document.preview");
               await page
                 .getByRole("button", { name: "Open attachment.htm in the side panel", exact: true })
                 .click();
-              await outer.waitFor();
-              const attachmentDocument = outer.contentFrame().frameLocator("iframe");
-              await attachmentDocument.getByRole("heading", { name: "Local HTML page" }).waitFor();
-              await panel
-                .locator("openclaw-chat-html-preview [role=status]")
-                .waitFor({ state: "hidden" });
-              await page.screenshot({
-                path: path.join(suite.artifactDir, `attachment-${mode}.png`),
-              });
-              for (const height of [1000, 480]) {
-                await page.setViewportSize({ width: 1440, height });
-                await expect
-                  .poll(async () => {
-                    const frame = await outer.boundingBox();
-                    const available = await panel
-                      .locator(".sidebar-content")
-                      .evaluate((element) => {
-                        const bounds = element.getBoundingClientRect();
-                        return (
-                          bounds.bottom - Number.parseFloat(getComputedStyle(element).paddingBottom)
-                        );
-                      });
-                    return Math.abs(frame!.y + frame!.height - available);
-                  })
-                  .toBeLessThanOrEqual(1);
-                const frame = await outer.boundingBox();
-                const viewport = await attachmentDocument.locator("body").evaluate(() => ({
-                  width: window.innerWidth,
-                  height: window.innerHeight,
-                }));
-                expect(viewport.width).toBeCloseTo(frame!.width, 0);
-                expect(viewport.height).toBeCloseTo(frame!.height, 0);
-              }
-              await page.setViewportSize({ width: 1440, height: 1000 });
-              const attachmentFrame = await outer.elementHandle();
-              await panel.getByRole("button", { name: "Source", exact: true }).click();
-              expect(await panel.locator("pre:visible").textContent()).toBe(attachmentSource);
-              expect(await panel.locator("a[download]").getAttribute("href")).toBe(mediaUrl);
+              const attachment = panel.locator("openclaw-chat-text-attachment");
+              const raw = attachment.locator("pre:visible");
+              await raw.waitFor();
+              expect(await raw.textContent()).toBe(attachmentSource);
+              expect(
+                await attachment.locator('a[download="attachment.htm"]').getAttribute("href"),
+              ).toBe(mediaUrl);
+              expect(
+                await attachment.locator("iframe, openclaw-chat-html-preview, h1, script").count(),
+              ).toBe(0);
+              expect(await gateway.getRequests("canvas.document.preview")).toEqual(previewRequests);
               await tab.click();
               expect(await originalFrame!.evaluate((frame) => frame.isConnected)).toBe(true);
-              expect(await attachmentFrame!.evaluate((frame) => frame.isConnected)).toBe(true);
               expect(await document.getByRole("textbox", { name: "Local note" }).inputValue()).toBe(
                 "Retain this page",
               );

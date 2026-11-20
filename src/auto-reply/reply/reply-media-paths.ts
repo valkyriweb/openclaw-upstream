@@ -27,6 +27,7 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
 import { FsSafeError } from "../../infra/fs-safe.js";
 import { collectReplyMediaEntries } from "../../infra/outbound/reply-media-entries.js";
+import { isPathInside } from "../../infra/path-guards.js";
 import { resolveOutboundMediaMaxBytes } from "../../media/configured-max-bytes.js";
 import type { OutboundMediaAccess } from "../../media/load-options.js";
 import { HostReadMediaTypeError, LocalMediaAccessError } from "../../media/local-media-access.js";
@@ -233,10 +234,18 @@ export function createReplyMediaSourcePreparer(
     if (cached) {
       return await cached;
     }
+    const sourceWorkspaceDir = workspaceDir ?? params.workspaceDir;
+    const workspaceHtmlAttachment = Boolean(
+      params.localMediaMaxBytes &&
+      sourceWorkspaceDir &&
+      mimeTypeFromFilePath(media) === "text/html" &&
+      isPathInside(path.resolve(sourceWorkspaceDir), path.resolve(media)),
+    );
     const mediaAccess = resolveAgentScopedHostOutboundMediaAccess({
       cfg: params.cfg,
       agentId,
-      workspaceDir: workspaceDir ?? params.workspaceDir,
+      workspaceDir: sourceWorkspaceDir,
+      ...(workspaceHtmlAttachment ? { restrictToWorkspace: true } : {}),
       sessionWorkspaceDir: sessionWorkspaceDir ?? params.sessionWorkspaceDir,
       workspaceOnly: params.workspaceOnly,
       allowHostWorkspace: params.allowHostWorkspace,
@@ -259,6 +268,7 @@ export function createReplyMediaSourcePreparer(
         ? resolveWebchatAttachmentFromUrl(media, maxBytes, {
             mediaAccess,
             localMediaMaxBytes: params.localMediaMaxBytes,
+            ...(workspaceHtmlAttachment ? { workspaceHtmlAttachment } : {}),
           })
         : resolveOutboundAttachmentFromUrl(media, maxBytes, { mediaAccess })
     )

@@ -89,6 +89,8 @@ type WebMediaOptions = {
   readFile?: OutboundMediaReadFile;
   /** Host-local fs-policy read piggyback; rejects plaintext-like document sends. */
   hostReadCapability?: boolean;
+  /** WebChat only: accept validated HTML bytes via the caller’s workspace-scoped reader. */
+  workspaceHtmlAttachment?: boolean;
 };
 
 export type ImageQualityPreference = "auto" | "efficient" | "balanced" | "high";
@@ -427,6 +429,7 @@ function assertHostReadMediaAllowed(params: {
   kind: MediaKind | undefined;
   buffer?: Buffer;
   trustedGeneratedHtmlPath?: HostReadHtmlTrust;
+  workspaceHtmlAttachment?: boolean;
 }): void {
   const declaredMime = normalizeMimeType(mimeTypeFromFilePath(params.filePath));
   const normalizedMime = normalizeMimeType(params.contentType);
@@ -437,11 +440,14 @@ function assertHostReadMediaAllowed(params: {
   if (declaredMime && HOST_READ_DECLARED_TEXT_MIMES.has(declaredMime)) {
     if (
       declaredMime === "text/html" &&
-      isTrustedGeneratedHostReadHtml({
-        sniffedContentType: params.sniffedContentType,
-        buffer: params.buffer,
-        trustedGeneratedHtmlPath: params.trustedGeneratedHtmlPath,
-      })
+      (params.workspaceHtmlAttachment
+        ? (!params.sniffedContentType || params.sniffedContentType === "text/html") &&
+          getValidatedHostReadText(params.buffer) !== undefined
+        : isTrustedGeneratedHostReadHtml({
+            sniffedContentType: params.sniffedContentType,
+            buffer: params.buffer,
+            trustedGeneratedHtmlPath: params.trustedGeneratedHtmlPath,
+          }))
     ) {
       return;
     }
@@ -826,6 +832,7 @@ async function loadWebMediaInternal(
     sandboxValidated = false,
     readFile: readFileOverride,
     hostReadCapability = false,
+    workspaceHtmlAttachment = false,
     imageCompression,
   } = options;
   mediaUrl = stripLegacyMediaDirectivePrefix(mediaUrl);
@@ -947,14 +954,13 @@ async function loadWebMediaInternal(
     await assertLocalMediaAllowed(mediaUrl, localRoots, { inboundRoots });
   }
 
-  const hostReadDeclaredMime = hostReadCapability
-    ? normalizeMimeType(mimeTypeFromFilePath(mediaUrl))
-    : undefined;
+  const declaredHtml = normalizeMimeType(mimeTypeFromFilePath(mediaUrl)) === "text/html";
+  const validateWorkspaceHtml = workspaceHtmlAttachment && declaredHtml;
   const htmlTrust =
-    hostReadDeclaredMime === "text/html"
+    hostReadCapability && declaredHtml && !validateWorkspaceHtml
       ? await resolveTrustedGeneratedHostReadHtml(mediaUrl)
       : undefined;
-  if (hostReadDeclaredMime === "text/html" && !htmlTrust) {
+  if (hostReadCapability && declaredHtml && !validateWorkspaceHtml && !htmlTrust) {
     throw new HostReadMediaTypeError(HOST_READ_DECLARED_TEXT_ERROR);
   }
 
@@ -1004,10 +1010,11 @@ async function loadWebMediaInternal(
       throw err;
     }
   }
-  const sniffedMime = hostReadCapability ? await detectMime({ buffer: data }) : undefined;
+  const validateType = hostReadCapability || validateWorkspaceHtml;
+  const sniffedMime = validateType ? await detectMime({ buffer: data }) : undefined;
   const mime = await detectMime({ buffer: data, filePath: mediaUrl });
   const kind = kindFromMime(mime);
-  if (hostReadCapability) {
+  if (validateType) {
     assertHostReadMediaAllowed({
       sniffedContentType: sniffedMime,
       contentType: mime,
@@ -1015,6 +1022,7 @@ async function loadWebMediaInternal(
       kind,
       buffer: data,
       trustedGeneratedHtmlPath: htmlTrust,
+      workspaceHtmlAttachment: validateWorkspaceHtml,
     });
   }
   let fileName = resolveLocalMediaFileName(mediaUrl);
@@ -1029,7 +1037,7 @@ async function loadWebMediaInternal(
     contentType: mime,
     kind,
     fileName,
-    trustedGeneratedHtmlSource: Boolean(htmlTrust && hostReadDeclaredMime === "text/html"),
+    trustedGeneratedHtmlSource: Boolean(htmlTrust),
   });
 }
 

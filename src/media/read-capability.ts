@@ -130,6 +130,7 @@ function workspaceOwnsMediaPath(access: OutboundMediaAccess | undefined, filePat
 }
 
 type AgentScopedOutboundMediaAccessParams = {
+  restrictToWorkspace?: boolean;
   cfg: OpenClawConfig;
   agentId?: string;
   mediaSources?: readonly string[];
@@ -209,9 +210,11 @@ function resolveAgentScopedMediaAccess(
       : hostLocalRoots
     : managedLocalRoots;
   const localRoots =
-    mediaReadAllowed && !registeredMedia
-      ? appendWorkspaceDirToLocalRoots(baseLocalRoots, resolvedWorkspaceDir)
-      : baseLocalRoots;
+    mediaReadAllowed && params.restrictToWorkspace && resolvedWorkspaceDir
+      ? [path.resolve(resolvedWorkspaceDir)]
+      : mediaReadAllowed && !registeredMedia
+        ? appendWorkspaceDirToLocalRoots(baseLocalRoots, resolvedWorkspaceDir)
+        : baseLocalRoots;
   let hostReadFile = params.mediaAccess?.readFile ?? params.mediaReadFile;
   if (!hostReadFile && mediaReadAllowed && resolveEffectiveToolFsRootExpansionAllowed(params)) {
     const workspaceRoot = resolveWorkspaceRoot(resolvedWorkspaceDir);

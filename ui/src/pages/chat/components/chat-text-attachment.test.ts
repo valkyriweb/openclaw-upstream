@@ -1,39 +1,17 @@
 /* @vitest-environment jsdom */
 
 import { afterEach, expect, it, vi } from "vitest";
-import { applicationContext, type ApplicationContext } from "../../../app/context.ts";
 import { waitForSolid } from "../../../test-helpers/solid-settle.ts";
 import type { SidebarContent } from "./chat-sidebar-content-types.ts";
 import "./chat-detail-panel.tsx";
 
 async function mountAttachment(
   overrides: Partial<Extract<SidebarContent, { kind: "attachment" }>> = {},
-  request = async (_method: string, params: { html: string }) => ({
-    html: params.html,
-    sandboxUrl: "/mcp-app-sandbox?frames=none",
-    sandboxPort: 8444,
-  }),
 ) {
   const panel = document.createElement("openclaw-chat-detail-panel") as HTMLElement & {
     content: SidebarContent;
     updateComplete: Promise<unknown>;
   };
-  const previewContext = {
-    gateway: {
-      snapshot: { client: { request }, phase: "connected" },
-      connection: { gatewayUrl: "ws://gateway.example:8443" },
-      subscribe: () => () => {},
-    },
-  } as unknown as ApplicationContext;
-  panel.addEventListener("context-request", (event) => {
-    if (
-      event.context === applicationContext &&
-      event.contextTarget.localName === "openclaw-chat-html-preview"
-    ) {
-      event.stopPropagation();
-      event.callback(previewContext);
-    }
-  });
   panel.content = {
     kind: "attachment",
     attachmentKind: "document",
@@ -355,10 +333,7 @@ it.each([
       expect(panel.querySelector("openclaw-chat-html-preview")).toBeNull();
       expect(panel.textContent).toContain("2 MiB");
     } else {
-      await vi.waitFor(() =>
-        expect(panel.querySelector("openclaw-chat-html-preview")).not.toBeNull(),
-      );
-      expect(panel.querySelector("pre")?.textContent).toBe(text);
+      await vi.waitFor(() => expect(panel.querySelector("pre")?.textContent).toBe(text));
     }
   },
 );
@@ -393,68 +368,19 @@ it.each([
 it.each([
   ["page.HTM", "application/octet-stream"],
   ["download", "Text/HTML; charset=UTF-8"],
+  ["page.html", "text/markdown"],
 ])(
-  "renders HTML attachment %s (%s) in a sandbox and preserves exact Source and download",
+  "shows HTML attachment %s (%s) as text with a download, not a live preview",
   async (title, mimeType) => {
     const text =
-      "\ufeff<!doctype html>\r\n<style>h1{color:red}</style><h1>Rendered page</h1><script>window.ready=true</script>\n";
+      "\ufeff<!doctype html>\r\n<style>h1{color:red}</style><h1>Not a rendered page</h1><script>window.ready=true</script>\n";
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(text)));
-    const request = vi.fn().mockResolvedValue({
-      html: text,
-      sandboxUrl: "/mcp-app-sandbox?frames=none",
-      sandboxPort: 8444,
-    });
-    const panel = await mountAttachment({ title, mimeType }, request);
-    await customElements.whenDefined("openclaw-chat-html-preview");
-    await waitForSolid(() =>
-      expect(panel.querySelector("openclaw-chat-html-preview")).not.toBeNull(),
-    );
-    await waitForSolid(() => expect(panel.querySelector("iframe")).not.toBeNull());
-    const frame = panel.querySelector("iframe");
-    expect(panel.querySelector("h1, script, style")).toBeNull();
-    expect(panel.querySelector("pre")?.hidden).toBe(true);
-    expect(panel.querySelector("pre")?.textContent).toBe(text);
-    const toggle = panel.querySelector<HTMLButtonElement>(
-      ".sidebar-file-toolbar button[aria-pressed]",
-    )!;
-    expect(toggle.textContent?.trim()).toBe("Source");
-    toggle.click();
-    await panel.querySelector("openclaw-chat-text-attachment")!.updateComplete;
-    expect(panel.querySelector("pre")?.hidden).toBe(false);
-    expect(panel.querySelector(".chat-html-preview")?.hasAttribute("hidden")).toBe(true);
-    expect(toggle.textContent?.trim()).toBe("Preview");
-    toggle.click();
-    await panel.querySelector("openclaw-chat-text-attachment")!.updateComplete;
-    expect(panel.querySelector("iframe")).toBe(frame);
-    expect(request).toHaveBeenCalledOnce();
+    const panel = await mountAttachment({ title, mimeType });
+
+    await vi.waitFor(() => expect(panel.querySelector("pre")?.textContent).toBe(text));
+    expect(panel.querySelector("iframe, openclaw-chat-html-preview, h1, script, style")).toBeNull();
     expect(panel.querySelector<HTMLAnchorElement>("a[download]")?.getAttribute("href")).toBe(
       "/__openclaw__/assistant-media?mediaTicket=text-preview",
     );
-    Reflect.set(panel, "embedSandboxMode", "strict");
-    await waitForSolid(() => {
-      const current = panel.querySelector("iframe");
-      expect(current).not.toBeNull();
-      expect(current).not.toBe(frame);
-    });
-    const strictFrame = panel.querySelector("iframe")!;
-    expect(strictFrame.hasAttribute("srcdoc")).toBe(false);
-    expect(strictFrame.getAttribute("sandbox")).toBe("allow-scripts allow-same-origin allow-forms");
-    const post = vi.spyOn(strictFrame.contentWindow!, "postMessage");
-    window.dispatchEvent(
-      new MessageEvent("message", {
-        source: strictFrame.contentWindow,
-        origin: new URL(strictFrame.src).origin,
-        data: {
-          method: "ui/notifications/sandbox-proxy-ready",
-          params: { sandboxUrl: strictFrame.src },
-        },
-      }),
-    );
-    await waitForSolid(() => expect(post).toHaveBeenCalledOnce());
-    expect(post.mock.calls[0]![0].params).toEqual({
-      html: text,
-      renderId: expect.any(String),
-      allowScripts: false,
-    });
   },
 );

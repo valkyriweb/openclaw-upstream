@@ -1,14 +1,11 @@
-import { createEffect, createMemo, createSignal, onCleanup, onSettled, Show } from "solid-js";
-import { LazyCustomElementRequestController } from "../../../app/lazy-custom-element.ts";
+import { createEffect, createMemo, createSignal, onSettled, Show } from "solid-js";
 import { MarkdownBlocks } from "../../../components/markdown-blocks-owner.ts";
 import { createMarkdownRef } from "../../../components/markdown-dom-ref.ts";
 import { toSanitizedMarkdownHtml } from "../../../components/markdown.ts";
 import { CopyButton } from "../../../components/solid/copy-button.tsx";
 import { Icon } from "../../../components/solid/icon.tsx";
-import { LazyViewError } from "../../../components/solid/lazy-view-error.tsx";
 import { registerFilePreviewEnglish } from "../../../i18n/locales/en-file-preview.ts";
 import { formatBytes } from "../../../lib/agents/display.ts";
-import type { EmbedSandboxMode } from "../../../lib/chat/tool-display.ts";
 import { registerEnglishCatalog, t } from "../../../lib/reactive/i18n.ts";
 import { detectTextDirection } from "../../../lib/text-direction.ts";
 import {
@@ -18,20 +15,9 @@ import {
 } from "../../../lit/solid-bridge.ts";
 import { AttachmentPreviewSkeleton } from "./chat-attachment-card-solid.tsx";
 import { readAttachmentText } from "./chat-attachment-text-reader.ts";
-import { htmlPreviewElement, isHtmlDocument } from "./chat-html-preview.ts";
+import { isHtmlDocument } from "./chat-html-preview.ts";
 
 registerEnglishCatalog(registerFilePreviewEnglish);
-
-declare module "@solidjs/web" {
-  namespace JSX {
-    interface IntrinsicElements {
-      "openclaw-chat-html-preview": HTMLAttributes<
-        HTMLElementTagNameMap["openclaw-chat-html-preview"]
-      > &
-        Properties<HTMLElementTagNameMap["openclaw-chat-html-preview"]>;
-    }
-  }
-}
 
 function MarkdownAttachment(props: { text: string; label: string }) {
   let article!: HTMLElement;
@@ -63,7 +49,6 @@ function MarkdownAttachment(props: { text: string; label: string }) {
 type TextAttachmentProps = {
   plainText: boolean;
   actions: unknown;
-  embedSandboxMode: EmbedSandboxMode;
   src: string;
   sourceIdentity: string;
   label: string;
@@ -95,23 +80,12 @@ function TextAttachment(props: TextAttachmentProps, host: SolidBridgeElement<Tex
   const [source, setSource] = createSignal(false);
   const [version, setVersion] = createSignal(0);
   const [retry, setRetry] = createSignal(0);
-  const [loaderRevision, setLoaderRevision] = createSignal(0);
-  let disposed = false;
-  const htmlPreviewLoader = new LazyCustomElementRequestController({
-    requestUpdate: () => {
-      if (!disposed) {
-        setLoaderRevision((value) => value + 1);
-      }
-    },
-    get updateComplete() {
-      return host.updateComplete;
-    },
-  });
   const htmlDocument = () => !props.plainText && isHtmlDocument(props.mimeType, props.label);
   const markdown = () => {
     const mimeType = props.mimeType.split(";", 1)[0]?.trim().toLowerCase();
     return (
       !props.plainText &&
+      !htmlDocument() &&
       (mimeType === "text/markdown" ||
         mimeType === "text/x-markdown" ||
         /\.(?:md|markdown)$/i.test(props.label))
@@ -198,27 +172,6 @@ function TextAttachment(props: TextAttachmentProps, host: SolidBridgeElement<Tex
       controller.abort();
     };
   });
-  createEffect(
-    () => htmlDocument() && text() !== null && !failed(),
-    (active) => htmlPreviewLoader.requestWhileActive(htmlPreviewElement, active),
-  );
-  onCleanup(() => {
-    disposed = true;
-    htmlPreviewLoader.requestWhileActive(htmlPreviewElement, false);
-  });
-  const htmlLoadState = () => {
-    loaderRevision();
-    const state = htmlPreviewLoader.visibleState;
-    return state?.status === "error" ? (
-      <LazyViewError
-        error={state.error}
-        stale={state.stale}
-        onRetry={() => htmlPreviewLoader.retry()}
-      />
-    ) : state ? (
-      <div role="status">{t("common.loading")}</div>
-    ) : null;
-  };
   const reader = createMemo(
     () => {
       const value = text();
@@ -247,18 +200,14 @@ function TextAttachment(props: TextAttachmentProps, host: SolidBridgeElement<Tex
               {t("common.retry")}
             </button>
           )}
-          {(markdown() || htmlDocument()) && text() !== null && (
+          {markdown() && text() !== null && (
             <button
               class="btn btn--sm"
               type="button"
               aria-pressed={source() ? "true" : "false"}
               onClick={() => setSource((value) => !value)}
             >
-              {source()
-                ? t("chat.workspaceFiles.preview")
-                : htmlDocument()
-                  ? t("chat.detailPanel.viewSource")
-                  : t("chat.detailPanel.viewRawText")}
+              {source() ? t("chat.workspaceFiles.preview") : t("chat.detailPanel.viewRawText")}
             </button>
           )}
           <a
@@ -284,31 +233,16 @@ function TextAttachment(props: TextAttachmentProps, host: SolidBridgeElement<Tex
       ) : (
         <Show when={reader()} keyed fallback={<AttachmentPreviewSkeleton />}>
           {(content) => (
-            <>
-              <Show when={htmlDocument()}>
-                <div class="chat-html-preview" hidden={source()}>
-                  {htmlLoadState()}
-                  <openclaw-chat-html-preview
-                    prop:html={content.text}
-                    prop:sourceIdentity={props.sourceIdentity || props.src}
-                    title={props.label}
-                    prop:embedSandboxMode={props.embedSandboxMode}
-                  />
-                </div>
-              </Show>
-              {markdown() && !htmlDocument() && !source() ? (
-                <MarkdownAttachment text={content.text} label={props.label} />
-              ) : (
-                <pre
-                  class="sidebar-attachment-preview__text"
-                  tabindex={0}
-                  aria-label={props.label}
-                  hidden={htmlDocument() && !source()}
-                >
+            <Show
+              when={markdown() && !source()}
+              fallback={
+                <pre class="sidebar-attachment-preview__text" tabindex={0} aria-label={props.label}>
                   {content.text}
                 </pre>
-              )}
-            </>
+              }
+            >
+              <MarkdownAttachment text={content.text} label={props.label} />
+            </Show>
           )}
         </Show>
       )}
@@ -323,7 +257,6 @@ export const ChatTextAttachment = defineSolidBridge<TextAttachmentProps>(
     properties: {
       plainText: { default: false },
       actions: { default: undefined, attribute: false },
-      embedSandboxMode: { default: "scripts" },
       src: { default: "" },
       sourceIdentity: { default: "" },
       label: { default: "" },
