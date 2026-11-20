@@ -295,6 +295,25 @@ afterEach(() => {
 });
 
 describe("session resource admission", () => {
+  it("admits a read-only session viewer and refuses the read when the session becomes a draft", async () => {
+    const test = fixture(["operator.read"]);
+    test.setVisibility("read-only");
+    const prepare = () =>
+      prepareGatewaySessionAccessAuthority({
+        policy: { mode: "read" },
+        requestParams: { sessionKey: key },
+        context: test.context,
+        client: test.client,
+        ownSessionOnly: false,
+      });
+    const { authority } = await prepare();
+    hold(authority);
+    expectCurrent(authority);
+    test.setVisibility("draft");
+    expect(() => authority.assertCurrent()).toThrow();
+    await expect(prepare()).rejects.toThrow();
+  });
+
   it("checks accepted service invocation while preserving retained actor lifetime", async () => {
     const test = fixture();
     test.client.internal = {
