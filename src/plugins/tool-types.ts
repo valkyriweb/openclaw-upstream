@@ -174,7 +174,11 @@ export type OpenClawPluginToolContext<Version extends 1 | 2 = 1> = Version exten
   ? OpenClawPluginToolContextBase & {
       assertInvocationCurrent: () => void;
       /** Optional on older hosts and on turns without admitted requester/session authority. */
-      runtimeContext?: { models?: PluginRequesterModels };
+      runtimeContext?: {
+        models?: PluginRequesterModels;
+        /** The signed-in profile for this single-requester Control UI turn. Not the session owner. */
+        readRequesterProfileId?: () => string | undefined;
+      };
     }
   : OpenClawPluginToolContextBase;
 

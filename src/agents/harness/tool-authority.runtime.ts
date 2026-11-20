@@ -231,6 +231,23 @@ async function withPreparedEmbeddedRunToolAuthorityOwned<T, Attempt extends Tool
   const personalToolParticipants = operation
     ? operation.personalToolParticipants
     : createReplyTurnParticipants(direct?.personalToolOwner);
+  const requesterProfileId = attempt.gatewayUiCommandTarget?.profileId;
+  const readRequesterProfileId =
+    internal.trigger === "user" &&
+    (!attempt.inputProvenance || attempt.inputProvenance.kind === "external_user") &&
+    requesterProfileId &&
+    requesterProfileId === operatorAuthority?.profileId &&
+    personalToolParticipants
+      ? () => {
+          assertReplyActive();
+          try {
+            const participant = personalToolParticipants.resolve();
+            return participant?.profileId === requesterProfileId ? requesterProfileId : undefined;
+          } catch {
+            return undefined;
+          }
+        }
+      : null;
   const assertReplyActive = () => {
     assertActive();
     operatorAuthority?.assertCurrent();
@@ -311,6 +328,7 @@ async function withPreparedEmbeddedRunToolAuthorityOwned<T, Attempt extends Tool
         sessionKey,
         operationalRunInstance: instance,
         personalToolParticipants,
+        readRequesterProfileId,
         watchdogAttempt,
         requesterOrigin,
         receiptAuthority: assertReplyActive,

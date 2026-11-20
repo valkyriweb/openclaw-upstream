@@ -29,6 +29,7 @@ export function createRuntimeBase(
       GATEWAY_SERVER_CAPS.SENDER_RESTRICTED_HIDDEN_HELPERS,
       COMMAND_NATIVE_SUBAGENTS_CAPABILITY,
       "requester-model-catalog-v1",
+      "tool-requester-profile-v1",
       "requester-model-family-v1",
       NATIVE_SUBAGENT_LIST_CAPABILITY,
       "native-subagent-profiles-v1",
