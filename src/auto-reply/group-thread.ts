@@ -39,6 +39,7 @@ export async function runGroupThread<T>(params: {
   messageId?: string;
   text: string;
   mentionedAgentIds?: string[];
+  primaryAgentId?: string;
   abortSignal?: AbortSignal;
   formatReply?: (text: string, participant: GroupThreadParticipant) => string;
   runTurn: (turn: GroupThreadTurn) => Promise<T>;
@@ -123,6 +124,13 @@ export async function runGroupThread<T>(params: {
           messageId:
             round === 1 ? rootId : `group-thread:${JSON.stringify([rootId, agentId, round])}`,
           digest,
+          ...(group.agents.length > 1 &&
+          params.primaryAgentId &&
+          group.agents.includes(params.primaryAgentId) &&
+          agentId !== params.primaryAgentId &&
+          !mentioned.includes(agentId)
+            ? { allowUnaddressedSecondaryNoReply: true as const }
+            : {}),
         };
         const reply: RoundReply = { agentId, name, text: "", replied: false };
         current.push(reply);

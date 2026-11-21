@@ -15,6 +15,8 @@ export type GroupThreadTurn = GroupThreadParticipant & {
   round: number;
   messageId: string;
   digest?: string;
+  /** Only set for an unaddressed non-primary broadcast participant. */
+  allowUnaddressedSecondaryNoReply?: true;
 };
 
 type GroupThreadRunState = {

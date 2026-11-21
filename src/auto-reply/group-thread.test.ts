@@ -9,6 +9,7 @@ import * as bindings from "../infra/outbound/session-binding-service.js";
 import type { PluginHookReplyPayloadSendingEvent } from "../plugins/hook-types.js";
 import { dispatchInboundMessage } from "./dispatch.js";
 import { resolveGroupThreadConfig } from "./group-thread-config.js";
+import { getGroupThreadTurn } from "./group-thread-context.js";
 import { buildThreadingToolContext } from "./reply/agent-runner-utils.js";
 import { createReplyTurnLedger } from "./reply/dispatch-from-config.turn-ledger.js";
 import type {
@@ -106,6 +107,7 @@ function dispatch(
   } = {},
 ) {
   const turns: Turn[] = [];
+  const groupThreadTurns: NonNullable<ReturnType<typeof getGroupThreadTurn>>[] = [];
   const delivered: {
     text: string | undefined;
     participant: ReplyDispatchRuntimeInfo["participant"];
@@ -150,6 +152,10 @@ function dispatch(
     outboundHooks: params.enableHooks ? "enabled" : "disabled",
     replyOptions: params.replyOptions,
     dispatchReplyFromConfig: async (turn) => {
+      const groupThreadTurn = getGroupThreadTurn();
+      if (groupThreadTurn) {
+        groupThreadTurns.push(groupThreadTurn);
+      }
       const index = turns.push(turn) - 1;
       const replies = await (params.reply?.(turn, index) ?? ["A useful answer."]);
       const ledger = createReplyTurnLedger(turn.dispatcher);
@@ -174,7 +180,7 @@ function dispatch(
       return params.result?.(turn, result) ?? result;
     },
   });
-  return { done, turns, delivered, deliveredPayloads };
+  return { done, turns, groupThreadTurns, delivered, deliveredPayloads };
 }
 
 async function completed(params: Parameters<typeof dispatch>[0]) {
@@ -261,6 +267,35 @@ describe("agent group thread dispatch", () => {
     } else {
       expect(run.delivered).toEqual(expected);
     }
+  });
+
+  it("marks only an unaddressed secondary participant for exact silence", async () => {
+    const cfg = config({ agents: ["alice", "bob"], mentionGating: true });
+    const run = await completed({ cfg, context: { AgentId: "alice" } });
+
+    expect(run.groupThreadTurns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ agentId: "alice" }),
+        expect.objectContaining({
+          agentId: "bob",
+          allowUnaddressedSecondaryNoReply: true,
+        }),
+      ]),
+    );
+    expect(run.groupThreadTurns.find((turn) => turn.agentId === "alice")).not.toHaveProperty(
+      "allowUnaddressedSecondaryNoReply",
+    );
+
+    const addressed = await completed({
+      cfg,
+      text: "@Bob, review this.",
+      context: { AgentId: "alice" },
+    });
+    expect(addressed.turns.map(({ ctx }) => ctx.AgentId)).toEqual(["bob"]);
+    expect(addressed.groupThreadTurns[0]).not.toHaveProperty("allowUnaddressedSecondaryNoReply");
+
+    const single = await completed({ cfg: config(["alice"]), context: { AgentId: "alice" } });
+    expect(single.groupThreadTurns[0]).not.toHaveProperty("allowUnaddressedSecondaryNoReply");
   });
 
   it.each(["group", "direct"] as const)("isolates %s account/topic namespaces", async (kind) => {
