@@ -37,12 +37,14 @@ type GatewayMethodStartupAvailability = "available" | "unavailable-until-sidecar
 export type GatewayMethodProfileAccess = "independent" | "required";
 
 /** A plugin operation addresses one existing session through the shared participation policy. */
-export type GatewayMethodSessionAccess = {
-  mode: "write";
-  allowOwnSessionScope?: boolean;
-  /** Reuse the complete effective session tool policy for this capability. */
-  requiredTool?: string;
-};
+export type GatewayMethodSessionAccess =
+  | { mode: "read"; allowOwnSessionScope?: never; requiredTool?: never }
+  | {
+      mode: "write";
+      allowOwnSessionScope?: boolean;
+      /** Reuse the complete effective session tool policy for this capability. */
+      requiredTool?: string;
+    };
 
 export type GatewayMethodHandler = (opts: never) => unknown;
 

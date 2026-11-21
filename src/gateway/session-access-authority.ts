@@ -346,16 +346,18 @@ export async function prepareGatewaySessionAccessAuthority(request: {
               projection.hasMembership(row.storePath, row.storeKey, identity),
           },
         );
-        if (
-          (params.ownSessionOnly &&
-            authorizeOwnSessionMutation({
-              client: policyClient,
-              target: current,
-              expectedProfileId: profileId,
-              isCreator: sharing.isCreator,
-            })) ||
-          sharing.authorizeTarget(current)
-        ) {
+        const accessDenied =
+          params.policy.mode === "read"
+            ? !sharing.canReadTarget(current)
+            : (params.ownSessionOnly &&
+                authorizeOwnSessionMutation({
+                  client: policyClient,
+                  target: current,
+                  expectedProfileId: profileId,
+                  isCreator: sharing.isCreator,
+                })) ||
+              sharing.authorizeTarget(current);
+        if (accessDenied) {
           denied();
         }
       } catch (error) {

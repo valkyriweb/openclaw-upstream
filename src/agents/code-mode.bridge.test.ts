@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import { afterEach, expect, it, vi } from "vitest";
+import { createPluginInlineViewResult } from "../plugins/inline-view.js";
 import { buildBlockedToolResult } from "./agent-tools.before-tool-call.js";
 import { execSchema } from "./bash-tools.schemas.js";
 import { createGatedToolFactory } from "./code-mode-concurrency.test-support.js";
@@ -35,6 +36,30 @@ afterEach(async () => {
   } finally {
     await resetCodeModeTestState();
   }
+});
+
+it("makes an opaque inline-view reference available to Code Mode, not the private contents", async () => {
+  // This checks result projection, not whether the host parks work at its deadline.
+  mockClock();
+  const payload = { resultId: "0123456789abcdef0123456789abcdef" };
+  const summary = "Answer visible to its requester";
+  const read = tool("private_read", async () =>
+    createPluginInlineViewResult("fake-code-mode", "private-answer", payload, {
+      summary,
+      version: 1,
+    }),
+  );
+  const result = await bridge([read])("return await private_read({});");
+  expect(result.status).toBe("completed");
+  expect(result.value).toEqual({
+    pluginInlineView: {
+      pluginId: "fake-code-mode",
+      viewId: "private-answer",
+      version: 1,
+      payload,
+      summary,
+    },
+  });
 });
 
 it.each([false, true])("drains settled combinators (failure=%s)", async (failure) => {

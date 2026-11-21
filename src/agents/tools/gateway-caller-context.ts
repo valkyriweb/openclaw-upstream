@@ -57,6 +57,8 @@ type ReceiptAuthority = (() => boolean | void) &
 type GatewayToolCallerIdentity = {
   watchdogAttempt?: SessionControllerWatchdogAttempt;
   personalToolParticipants?: ReplyTurnParticipants;
+  /** Host-owned reader of the authenticated interactive tool requester, not a selected user. */
+  readRequesterProfileId?: (() => string | undefined) | null;
   personalToolUser?: string;
   personalToolIdentityScoped?: true;
   personalToolSelection?: GatewayToolOperatorSelection;
@@ -624,6 +626,10 @@ export async function withGatewayToolCallerIdentity<T>(
       workspacePublicationPolicy: inheritedValue("workspacePublicationPolicy"),
       workspaceEvidenceSandbox: inheritedValue("workspaceEvidenceSandbox"),
       personalToolParticipants: inheritedValue("personalToolParticipants"),
+      readRequesterProfileId:
+        identity.readRequesterProfileId === undefined
+          ? inheritedOwner?.readRequesterProfileId
+          : identity.readRequesterProfileId,
       personalToolUser: inheritedValue("personalToolUser"),
       personalToolIdentityScoped: inheritedValue("personalToolIdentityScoped"),
       personalToolSelection: inheritedValue("personalToolSelection"),
