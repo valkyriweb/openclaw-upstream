@@ -48,6 +48,27 @@ describe("gateway method registry", () => {
       );
     }
   });
+  it("registers a private answer RPC with authenticated session read access", () => {
+    const plugin = createPluginGatewayMethodDescriptor({
+      pluginId: "example",
+      name: "example.privateAnswer.read",
+      handler,
+      scope: READ_SCOPE,
+      sessionAccess: { mode: "read" },
+    });
+    const registry = createGatewayMethodRegistry([plugin]);
+    expect(registry.getScope(plugin.name)).toBe(READ_SCOPE);
+    expect(registry.requiresAuthenticatedProfile(plugin.name)).toBe(true);
+    expect(registry.getSessionAccess?.(plugin.name)).toEqual({ mode: "read" });
+    for (const invalid of [
+      { profileAccess: "independent" },
+      { scope: WRITE_SCOPE },
+    ] satisfies Partial<GatewayMethodDescriptorInput>[]) {
+      expect(() => createGatewayMethodRegistry([{ ...plugin, ...invalid }])).toThrow(
+        "session-scoped gateway methods require operator.read and an authenticated profile",
+      );
+    }
+  });
   it.each(["enumerable", "non-enumerable", "inherited"])("indexes %s metadata", (properties) => {
     const writeDescriptor = core("example.write", { scope: WRITE_SCOPE });
     const policy = {

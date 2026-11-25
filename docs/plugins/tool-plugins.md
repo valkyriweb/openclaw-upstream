@@ -7,6 +7,7 @@ read_when:
   - You want to use defineToolPlugin instead of hand-writing plugin manifest metadata
   - You need to create, generate, validate, test, or publish a tool-only plugin
   - You need the plugin tool context's memory audience and currency guards
+  - You need to bind a tool to a verified Control UI requester
 ---
 
 `defineToolPlugin` builds a plugin that only adds agent-callable tools: no
@@ -17,6 +18,18 @@ runtime code.
 For provider, channel, hook, service, or mixed-capability plugins, start with
 [Building plugins](/plugins/building-plugins), [Channel Plugins](/plugins/sdk-channel-plugins),
 or [Provider Plugins](/plugins/sdk-provider-plugins) instead.
+
+## Verified Control UI requester
+
+On hosts advertising `tool-requester-profile-v1`, version 2 tool factories can
+read `ctx.runtimeContext?.readRequesterProfileId?.()`. It identifies the single
+authenticated Control UI requester for the current admitted turn, not the
+session owner, a selected participant, or the recipient of a chat event. It is
+absent or refuses on other turns, ambiguous input, or stale authority. Do not
+fall back to sender labels or creator identity. Recheck before each external
+request and before publishing a result. This binding does not authorize that
+result's readers. Keep protected data out of shared tool results and hydrate
+private views through a separately authorized request.
 
 ## Requirements
 

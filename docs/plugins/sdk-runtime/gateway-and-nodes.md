@@ -184,6 +184,11 @@ checks the shared effective session tool policy and an admitted agent run's
 tool limits. Agent callers are bound to their own conversation. Currently,
 resource tool-policy admission does not support locked model selection.
 
+For read-only operations, set `scope: "operator.read"` and
+`sessionAccess: { mode: "read" }`. The gateway applies the existing session-read
+policy to the requested session. Read mode does not admit writes or add a tool
+permission.
+
 The handler receives `sessionAccessAuthority`. Call `assertCurrent()` before
 and after awaited preparation and immediately before effects. The router closes
 this invocation handle when the handler finishes; it cannot be reused to adopt

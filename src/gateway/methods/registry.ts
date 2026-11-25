@@ -38,13 +38,13 @@ function normalizeDescriptor(input: GatewayMethodDescriptorInput): GatewayMethod
   const profileAccess =
     input.profileAccess ??
     (input.sessionAccess || input.owner.kind !== "core" ? "required" : "independent");
-  if (
-    input.sessionAccess &&
-    (normalizedScope !== "operator.write" || profileAccess === "independent")
-  ) {
-    throw new Error(
-      `session-scoped gateway methods require operator.write and an authenticated profile: ${name}`,
-    );
+  if (input.sessionAccess) {
+    const requiredScope = input.sessionAccess.mode === "read" ? "operator.read" : "operator.write";
+    if (normalizedScope !== requiredScope || profileAccess === "independent") {
+      throw new Error(
+        `session-scoped gateway methods require ${requiredScope} and an authenticated profile: ${name}`,
+      );
+    }
   }
   if (
     input.shareKey &&

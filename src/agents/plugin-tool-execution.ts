@@ -18,6 +18,7 @@ import { prepareSandboxProcessCleanup } from "./sandbox/process-cleanup.js";
 import { shellEscape } from "./sandbox/remote-shell-command.js";
 import type { SandboxContext } from "./sandbox/types.js";
 import { assertCompleteToolResult, resolveToolResultBudget } from "./tool-result-limits.js";
+import { getGatewayToolCallerIdentity } from "./tools/gateway-caller-context.js";
 
 export type PluginToolExecutionCapabilities = Pick<
   OpenClawPluginToolContext<2>,
@@ -44,6 +45,9 @@ export function preparePluginToolExecutionCapabilities(params: {
         .containerPath
     : sandbox?.containerWorkdir;
   const authority = params.authority;
+  const caller = getGatewayToolCallerIdentity();
+  const readRequesterProfileId =
+    caller && caller.sessionKey === params.sessionKey ? caller.readRequesterProfileId : undefined;
   const hostRoot = authority
     ? resolveOpenClawPackageRootSync({ moduleUrl: import.meta.url })
     : null;
@@ -80,6 +84,15 @@ export function preparePluginToolExecutionCapabilities(params: {
   const resultBudget = resolveToolResultBudget(params.modelContextWindowTokens);
   return (assertInvocationCurrent, pluginSignal) => ({
     runtimeContext: {
+      readRequesterProfileId: readRequesterProfileId
+        ? () => {
+            assertInvocationCurrent();
+            if (getGatewayToolCallerIdentity()?.readRequesterProfileId !== readRequesterProfileId) {
+              return undefined;
+            }
+            return readRequesterProfileId();
+          }
+        : undefined,
       models: authority
         ? createPluginRequesterModels({
             ...params,
