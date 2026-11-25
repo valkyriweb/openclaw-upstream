@@ -260,6 +260,7 @@ export async function dispatchGroupThread(
     messageId: ctx.MessageSid,
     text: ctx.rawText ?? ctx.RawBody ?? ctx.Body ?? "",
     mentionedAgentIds: ctx.GroupThread?.mentionedAgentIds,
+    primaryAgentId: ctx.AgentId,
     abortSignal: signals.length > 1 ? AbortSignal.any(signals) : signals[0],
     formatReply: params.replyOptions?.groupThreadReplyFormatter,
     runTurn: async (turn) => {

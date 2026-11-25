@@ -1,10 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { isCompactionReplayCheckpoint } from "@openclaw/ai/transports";
 import { extractErrorCode } from "@openclaw/normalization-core/error-coercion";
+import { getGroupThreadTurn } from "../../../auto-reply/group-thread-context.js";
 import {
   retainSilentFinalPayloads,
   setReplyPayloadMetadata,
 } from "../../../auto-reply/reply-payload.js";
+import { isSilentReplyText } from "../../../auto-reply/tokens.js";
 import { freezeDiagnosticTraceContext } from "../../../infra/diagnostic-trace-context.js";
 import { formatErrorMessage } from "../../../infra/errors.js";
 import { classifyGatewayStorageFailure } from "../../../infra/sqlite-error-diagnostics.js";
@@ -26,6 +28,7 @@ import {
   isHostMissingReplyNoticeText,
   MISSING_REPLY_NOTICE_TEXT,
   resolveReplyExpectation,
+  type ReplyExpectation,
   shouldDeliverMissingReplyNotice,
 } from "../../reply-completion.js";
 import { hasPendingSessionToolHandoff } from "../../tools/session-tool-handoff.js";
@@ -137,7 +140,12 @@ export async function resolveEmbeddedRunTerminal(input: {
   contextRecoveryState: EmbeddedRunContextRecoveryState;
 }): Promise<TerminalResolution> {
   const { runParams, attempt, retryState, sessionPromptState } = input;
-  const replyExpectation = resolveReplyExpectation(runParams);
+  const allowsUnaddressedSecondaryNoReply =
+    getGroupThreadTurn()?.allowUnaddressedSecondaryNoReply === true &&
+    isSilentReplyText(input.prepared.finalAssistantRawText);
+  const replyExpectation = allowsUnaddressedSecondaryNoReply
+    ? "optional"
+    : resolveReplyExpectation(runParams);
   const runLogContext = `runId=${runParams.runId} sessionId=${runParams.sessionId}`;
   const modelLogContext = `${runLogContext} provider=${input.activeErrorContext.provider}/${input.activeErrorContext.model}`;
   const { externalAbort, promptError } = projectAgentRunAttemptTerminal(attempt.terminal);
@@ -310,6 +318,7 @@ export async function resolveEmbeddedRunTerminal(input: {
     );
     return completeEmbeddedRun({
       ...input,
+      replyExpectation,
       continuationPending,
       incompleteTurnText: MISSING_REPLY_NOTICE_TEXT,
       payloadCount: 0,
@@ -342,6 +351,7 @@ export async function resolveEmbeddedRunTerminal(input: {
     );
     return completeEmbeddedRun({
       ...input,
+      replyExpectation,
       continuationPending,
       incompleteTurnText,
       payloadCount: terminalFacts.payloadCount,
@@ -376,6 +386,7 @@ export async function resolveEmbeddedRunTerminal(input: {
 
   return completeEmbeddedRun({
     ...input,
+    replyExpectation,
     continuationPending,
     payloadCount: terminalFacts.payloadCount,
     payloadsForTerminalPath,
@@ -387,6 +398,7 @@ export async function resolveEmbeddedRunTerminal(input: {
 async function completeEmbeddedRun(
   input: Parameters<typeof resolveEmbeddedRunTerminal>[0] & {
     continuationPending: boolean;
+    replyExpectation: ReplyExpectation;
     payloadCount: number;
     payloadsForTerminalPath?: EmbeddedAgentRunResult["payloads"];
     emptyAssistantReplyIsSilent?: boolean;
@@ -599,7 +611,7 @@ async function completeEmbeddedRun(
         },
         agentHarnessResultClassification: input.attempt.agentHarnessResultClassification,
         terminalReply,
-        terminalReplyExpectation: resolveReplyExpectation(input.runParams),
+        terminalReplyExpectation: input.replyExpectation,
         ...(suppressErrorNotice ? { suppressErrorNotice } : {}),
         ...(error
           ? { error }
